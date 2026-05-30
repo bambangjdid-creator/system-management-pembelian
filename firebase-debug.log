@@ -1,0 +1,44 @@
+[debug] [2026-05-23T04:30:54.043Z] ----------------------------------------------------------------------
+[debug] [2026-05-23T04:30:54.044Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\sumbe\AppData\Local\npm-cache\_npx\ba4f1959e38407b5\node_modules\firebase-tools\lib\bin\firebase.js init dataconnect --project demo-no-project
+[debug] [2026-05-23T04:30:54.045Z] CLI Version:   15.18.0
+[debug] [2026-05-23T04:30:54.045Z] Platform:      win32
+[debug] [2026-05-23T04:30:54.045Z] Node Version:  v24.16.0
+[debug] [2026-05-23T04:30:54.045Z] Time:          Sat May 23 2026 11:30:54 GMT+0700 (Western Indonesia Time)
+[debug] [2026-05-23T04:30:54.045Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-05-23T04:30:54.047Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  C:\Users\sumbe\Downloads\system-management-pembelian
+
+[debug] [2026-05-23T04:30:55.956Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-05-23T04:30:55.956Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[info] 
+=== Project Setup
+[info] 
+[info] First, let's associate this project directory with a Firebase project.
+[info] You can create multiple project aliases by running firebase use --add, 
+[info] 
+[info] Skipping Firebase project setup because a demo project is provided
+[info] 
+=== Dataconnect Setup
+[info] +  dataconnect: Detected existing apps . (web) 
+[info] +  Wrote dataconnect\dataconnect.yaml 
+[info] +  Wrote dataconnect\seed_data.gql 
+[info] +  Wrote dataconnect\schema\schema.gql 
+[info] +  Wrote dataconnect\example\connector.yaml 
+[info] +  Wrote dataconnect\example\queries.gql 
+[info] +  Wrote dataconnect\example\mutations.gql 
+[info] +  Wrote dataconnect\example\connector.yaml 
+[info] i  dataconnect: Installing the generated SDKs ... 
+[info] i  dataconnect: downloading dataconnect-emulator-3.4.8.exe... {"metadata":{"emulator":{"name":"dataconnect"},"message":"downloading dataconnect-emulator-3.4.8.exe..."}}
+[debug] [2026-05-23T04:31:01.181Z] >>> [apiv2][query] GET https://storage.googleapis.com/firemat-preview-drop/emulator/dataconnect-emulator-windows-amd64-v3.4.8 
+[debug] [2026-05-23T04:31:01.493Z] <<< [apiv2][status] GET https://storage.googleapis.com/firemat-preview-drop/emulator/dataconnect-emulator-windows-amd64-v3.4.8 200
+[debug] [2026-05-23T04:31:01.493Z] <<< [apiv2][body] GET https://storage.googleapis.com/firemat-preview-drop/emulator/dataconnect-emulator-windows-amd64-v3.4.8 [stream]
