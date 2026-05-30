@@ -1,0 +1,8 @@
+{
+  "name": "System Managment Pembelian",
+  "description": "A high-performance PR/PO management system with multi-level approval workflows, real-time dashboards, and Google Sheets integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
