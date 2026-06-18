@@ -26,6 +26,10 @@ jobs:
       - name: Build Application
         run: npm run build
 
+      # INI TAMBAHANNYA: Membuat file .nojekyll
+      - name: Disable Jekyll
+        run: touch ./dist/.nojekyll
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
