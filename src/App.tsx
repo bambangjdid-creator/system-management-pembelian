@@ -988,42 +988,20 @@ export default function App() {
   const openPRDetail = async (pr) => {
     // Generate a unique cache buster for the preview
     const cacheBuster = Date.now();
-    
-    // Resolve absolute preview URL correctly
-    let absolutePreviewUrl = "";
-    if (pr.pdfLink) {
-      if (pr.pdfLink.startsWith("http")) {
-        absolutePreviewUrl = pr.pdfLink;
-      } else {
-        absolutePreviewUrl = `${window.location.origin}${pr.pdfLink}`;
-      }
-    } else {
-      absolutePreviewUrl = `${window.location.origin}/api/pdf/pr/${pr.id.replace(/\//g, '_')}.pdf?v=${cacheBuster}`;
-    }
-    
-    // Convert Drive link to embeddable preview if available
-    let embedUrl = null;
-    if (absolutePreviewUrl.includes('drive.google.com')) {
-        const fileIdMatch = absolutePreviewUrl.match(/\/d\/([^\/]+)/);
-        if (fileIdMatch) {
-            embedUrl = `https://drive.google.com/file/d/${fileIdMatch[1]}/preview`;
-        }
-    }
+    const cleanId = pr.id.replace(/\//g, '_');
+    const localPreviewUrl = `/api/pdf/pr/${cleanId}.pdf?v=${cacheBuster}`;
+    const originalLink = pr.pdfLink || localPreviewUrl;
     
     Swal.fire({
       title: `Detail PR: ${pr.id}`,
       html: `
         <div class="space-y-4">
           <div class="relative bg-slate-100 rounded-xl overflow-hidden shadow-inner" style="height: 600px;">
-            <div id="pdf-viewer-container" class="w-full h-full">
-                <div class="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
-                    <div class="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                    <div>
-                        <p class="font-bold text-slate-700">Loading document...</p>
-                        <p class="text-xs text-slate-400 mt-1">Fetching PDF Preview</p>
-                    </div>
-                </div>
-            </div>
+            <iframe 
+                src="${localPreviewUrl}" 
+                class="w-full h-full border-0" 
+                title="PR Preview"
+            ></iframe>
           </div>
           
           <div class="flex gap-2 justify-center mt-6">
@@ -1032,9 +1010,9 @@ export default function App() {
             <button id="btn-approve" class="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg transition-all transform hover:-translate-y-0.5">APPROVE</button>
           </div>
           
-          <div class="mt-4 pt-4 border-t border-slate-100 flex flex-col items-center gap-1">
-             <a href="${pr.pdfLink || absolutePreviewUrl}" target="_blank" class="text-indigo-600 font-bold hover:underline flex items-center gap-1">
-               <svg class="w-4 h-4" fill="currentColor" viewBox="0 24 24"><path d="M7.71 3.5C7 3.5 6.44 3.93 6.13 4.5L1.5 12.5L1.5 12.5L1.5 12.5C1.19 13.07 1.19 13.73 1.5 14.3L3.81 18.3C4.12 18.87 4.69 19.3 5.39 19.3H18.73C19.43 19.3 20 18.87 20.31 18.3L22.62 14.3C22.93 13.73 22.93 13.07 22.62 12.5L18 4.5C17.69 3.93 17.13 3.5 16.43 3.5H7.71ZM9 7H15.14L19.04 13.75L15.91 19.16C15.54 18.23 15 17.3 14.4 16.42L11 10.5L11 10.5L9.6 8.23L9 7Z"/></svg>
+          <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/80 flex flex-col items-center gap-1">
+             <a href="${originalLink}" target="_blank" class="text-indigo-600 dark:text-indigo-400 font-bold hover:underline flex items-center gap-1">
+               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5C7 3.5 6.44 3.93 6.13 4.5L1.5 12.5L1.5 12.5L1.5 12.5C1.19 13.07 1.19 13.73 1.5 14.3L3.81 18.3C4.12 18.87 4.69 19.3 5.39 19.3H18.73C19.43 19.3 20 18.87 20.31 18.3L22.62 14.3C22.93 13.73 22.93 13.07 22.62 12.5L18 4.5C17.69 3.93 17.13 3.5 16.43 3.5H7.71ZM9 7H15.14L19.04 13.75L15.91 19.16C15.54 18.23 15 17.3 14.4 16.42L11 10.5L11 10.5L9.6 8.23L9 7Z"/></svg>
                Open Original / Download
              </a>
           </div>
@@ -1043,38 +1021,50 @@ export default function App() {
       width: '900px',
       showConfirmButton: false,
       showCloseButton: true,
-      didOpen: async () => {
-        const container = document.getElementById('pdf-viewer-container');
-        
-        // Priority 1: Use Drive Embed if link is available (starts with http and has drive.google.com)
-        if (embedUrl) {
-            if (container) {
-                container.innerHTML = `
-                    <iframe 
-                        src="${embedUrl}" 
-                        class="w-full h-full border-0" 
-                        allow="autoplay"
-                        title="PR Preview"
-                    ></iframe>
-                `;
-            }
-        } else {
-            // Priority 2: Use direct absolute local preview URL
-            if (container) {
-                container.innerHTML = `
-                    <iframe 
-                        src="${absolutePreviewUrl}" 
-                        class="w-full h-full border-0" 
-                        title="PR Preview"
-                    ></iframe>
-                `;
-            }
-        }
-
+      didOpen: () => {
         document.getElementById('btn-reject').onclick = () => handleAction(pr.id, 'REJECT');
         document.getElementById('btn-pending').onclick = () => handleAction(pr.id, 'PENDING');
         document.getElementById('btn-approve').onclick = () => handleAction(pr.id, 'APPROVE');
       }
+    });
+  };
+
+  const openPODetail = async (po) => {
+    // Generate a unique cache buster for the preview
+    const cacheBuster = Date.now();
+    const cleanPoNo = po.poNo.replace(/\//g, '_');
+    const localPreviewUrl = `/api/pdf/po/${cleanPoNo}.pdf?v=${cacheBuster}`;
+    const originalLink = po.pdfLink || localPreviewUrl;
+    
+    Swal.fire({
+      title: `Detail PO: ${po.poNo}`,
+      html: `
+        <div class="space-y-4">
+          <div class="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl text-left text-xs space-y-1.5 border border-slate-100 dark:border-slate-800">
+            <p class="flex justify-between"><span class="font-black text-slate-400 uppercase text-[9px] tracking-wider">PR Link:</span> <span class="font-bold text-slate-800 dark:text-slate-200">${po.prId || '-'}</span></p>
+            <p class="flex justify-between"><span class="font-black text-slate-400 uppercase text-[9px] tracking-wider">Supplier:</span> <span class="font-bold text-slate-800 dark:text-slate-200">${po.supplier || '-'}</span></p>
+            <p class="flex justify-between"><span class="font-black text-slate-400 uppercase text-[9px] tracking-wider">Tanggal Kirim:</span> <span class="font-bold text-slate-800 dark:text-slate-200">${po.deliveryDate || '-'}</span></p>
+            <p class="flex justify-between"><span class="font-black text-slate-400 uppercase text-[9px] tracking-wider">Pembuat PO:</span> <span class="font-bold text-slate-800 dark:text-slate-200">${po.purchaseName || '-'}</span></p>
+            <p class="flex justify-between"><span class="font-black text-slate-400 uppercase text-[9px] tracking-wider">Catatan:</span> <span class="font-bold text-slate-800 dark:text-slate-200">${po.notes || '-'}</span></p>
+          </div>
+          <div class="relative bg-slate-100 rounded-xl overflow-hidden shadow-inner" style="height: 600px;">
+            <iframe 
+                src="${localPreviewUrl}" 
+                class="w-full h-full border-0" 
+                title="PO Preview"
+            ></iframe>
+          </div>
+          <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/80 flex flex-col items-center gap-1">
+             <a href="${originalLink}" target="_blank" class="text-indigo-650 dark:text-indigo-400 font-bold hover:underline flex items-center gap-1">
+               <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7.71 3.5C7 3.5 6.44 3.93 6.13 4.5L1.5 12.5L1.5 12.5L1.5 12.5C1.19 13.07 1.19 13.73 1.5 14.3L3.81 18.3C4.12 18.87 4.69 19.3 5.39 19.3H18.73C19.43 19.3 20 18.87 20.31 18.3L22.62 14.3C22.93 13.73 22.93 13.07 22.62 12.5L18 4.5C17.69 3.93 17.13 3.5 16.43 3.5H7.71ZM9 7H15.14L19.04 13.75L15.91 19.16C15.54 18.23 15 17.3 14.4 16.42L11 10.5L11 10.5L9.6 8.23L9 7Z"/></svg>
+               Open Original / Download
+             </a>
+          </div>
+        </div>
+      `,
+      width: '900px',
+      showConfirmButton: false,
+      showCloseButton: true
     });
   };
 
@@ -1957,7 +1947,7 @@ export default function App() {
                         })
                         .map(po => (
                         <tr key={po.poNo} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-8 py-4 font-bold text-slate-800 text-xs text-center">{po.poNo}</td>
+                          <td onClick={() => openPODetail(po)} className="px-8 py-4 font-bold text-indigo-600 border-l-4 border-l-transparent hover:border-l-indigo-500 text-xs cursor-pointer hover:underline transition-all text-center">{po.poNo}</td>
                           <td className="px-8 py-4 text-center font-bold text-indigo-600 text-xs">{po.prId}</td>
                           <td className="px-8 py-4">
                             <p className="font-bold text-slate-800 text-sm">{po.supplier}</p>
@@ -1970,11 +1960,9 @@ export default function App() {
                           </td>
                           <td className="px-8 py-4">
                              <div className="flex justify-center">
-                                {po.pdfLink ? (
-                                    <a href={po.pdfLink} target="_blank" className="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors">
-                                        <FileText className="w-4 h-4" />
-                                    </a>
-                                ) : '-'}
+                                <button onClick={() => openPODetail(po)} className="p-2 bg-indigo-55 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors">
+                                    <FileText className="w-4 h-4" />
+                                </button>
                              </div>
                           </td>
                         </tr>

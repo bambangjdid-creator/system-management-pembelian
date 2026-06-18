@@ -244,6 +244,16 @@ async function createPrPdf(prId: string, data: any, auth: any) {
     fs.mkdirSync(PDF_DIR, { recursive: true });
   }
 
+  // Pre-calculate common template values
+  const totalQty = data.items.reduce((sum: number, item: any) => sum + Number(item.qty || 0), 0);
+  
+  const estimasiText = `( Stock untuk penjualan ` + data.items.map((item: any) => {
+    const avg = Number(item.avgSales || 0);
+    if (!avg || avg === 0) return `0 hari (Item: ${item.itemName})`;
+    const days = Math.round((Number(item.qty) * 30) / avg);
+    return `${days} hari (Item: ${item.itemName})`;
+  }).join(", ") + ` )`;
+
   console.log(`[DOCS] Starting template merge for ${prId} using provided auth...`);
   
   try {
@@ -264,7 +274,6 @@ async function createPrPdf(prId: string, data: any, auth: any) {
     if (!copyId) throw new Error("Failed to copy template");
 
     // 2. Replacement Data
-    const totalQty = data.items.reduce((sum: number, item: any) => sum + Number(item.qty || 0), 0);
     const requests: any[] = [
       { replaceAllText: { containsText: { text: '{{No_PR}}', matchCase: false }, replaceText: prId } },
       { replaceAllText: { containsText: { text: '{{Tanggal_Order}}', matchCase: false }, replaceText: data.date } },
@@ -273,17 +282,36 @@ async function createPrPdf(prId: string, data: any, auth: any) {
       { replaceAllText: { containsText: { text: '{{Nama Supplier}}', matchCase: false }, replaceText: data.supplier } },
       { replaceAllText: { containsText: { text: '{{Catatan}}', matchCase: false }, replaceText: data.notes || "-" } },
       { replaceAllText: { containsText: { text: 'SUM{{Qty}}', matchCase: false }, replaceText: String(totalQty) } },
+      { replaceAllText: { containsText: { text: '{{Estimasi}}', matchCase: false }, replaceText: estimasiText } },
     ];
 
-    // Estimasi for the first item as a summary or join multiple
-    const estimasiText = data.items.map((item: any) => {
-      const avg = Number(item.avgSales || 0);
-      if (!avg || avg === 0) return `Stock untuk penjualan 0 hari (Item: ${item.itemName})`;
-      const days = Math.round((Number(item.qty) * 30) / avg);
-      return `Stock untuk penjualan ${days} hari (Item: ${item.itemName})`;
-    }).join(", ");
-
-    requests.push({ replaceAllText: { containsText: { text: '{{Estimasi}}', matchCase: false }, replaceText: estimasiText } });
+    // Map un-indexed placeholders for the first item
+    if (data.items.length > 0) {
+      const firstItem = data.items[0];
+      requests.push(
+        { replaceAllText: { containsText: { text: '{{NO}}', matchCase: false }, replaceText: "1" } },
+        { replaceAllText: { containsText: { text: '{{NAMA_BARANG}}', matchCase: false }, replaceText: firstItem.itemName } },
+        { replaceAllText: { containsText: { text: '{{SATUAN}}', matchCase: false }, replaceText: firstItem.unit } },
+        { replaceAllText: { containsText: { text: '{{QTY}}', matchCase: false }, replaceText: String(firstItem.qty) } },
+        { replaceAllText: { containsText: { text: '{{STOCK}}', matchCase: false }, replaceText: String(firstItem.stockOnhand || 0) } },
+        { replaceAllText: { containsText: { text: '{{AVG}}', matchCase: false }, replaceText: String(Number(firstItem.avgSales || 0).toFixed(1)) } },
+        { replaceAllText: { containsText: { text: '{{B1}}', matchCase: false }, replaceText: String(firstItem.b1 || 0) } },
+        { replaceAllText: { containsText: { text: '{{B2}}', matchCase: false }, replaceText: String(firstItem.b2 || 0) } },
+        { replaceAllText: { containsText: { text: '{{B3}}', matchCase: false }, replaceText: String(firstItem.b3 || 0) } }
+      );
+    } else {
+      requests.push(
+        { replaceAllText: { containsText: { text: '{{NO}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{NAMA_BARANG}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{SATUAN}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{QTY}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{STOCK}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{AVG}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{B1}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{B2}}', matchCase: false }, replaceText: "" } },
+        { replaceAllText: { containsText: { text: '{{B3}}', matchCase: false }, replaceText: "" } }
+      );
+    }
 
     // Map items to placeholders up to 10 items.
     data.items.forEach((item: any, i: number) => {
@@ -353,36 +381,154 @@ async function createPrPdf(prId: string, data: any, auth: any) {
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
 
-    doc.rect(30, 30, 50, 50).fill("#003399");
-    doc.font("Helvetica-Bold").fontSize(18).fillColor("#FFFFFF").text("SAU", 30, 48, { width: 50, align: "center" });
-    doc.fillColor("#000000").fontSize(22).text("CV. SUMBER ALODIE UTAMA", 90, 45);
-    const purpleBoxWidth = 180;
-    doc.fillColor("#6b46c1").roundedRect(565 - purpleBoxWidth, 35, purpleBoxWidth, 35, 10).fill();
-    doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(12).text("FORM ORDER BARANG", 565 - purpleBoxWidth, 47, { width: purpleBoxWidth, align: "center" });
-    doc.moveTo(30, 92).lineTo(565, 92).lineWidth(3).strokeColor("#000000").stroke();
-    doc.lineWidth(1).fillColor("#000000").font("Helvetica").fontSize(10);
-    doc.text(`REQUESTER: ${data.requester}`, 30, 110);
-    doc.text(`DATE: ${data.date}`, 30, 130);
-    doc.text(`PR NO: ${prId}`, 330, 110);
-    doc.text(`SUPPLIER: ${data.supplier}`, 330, 130);
+    // 1. Logo Block & Company Title
+    doc.rect(30, 30, 50, 40).fill("#1d4ed8"); // Royal blue box
+    doc.font("Helvetica-Bold").fontSize(18).fillColor("#FFFFFF").text("sau", 30, 42, { width: 50, align: "center" });
+    doc.fillColor("#000000").fontSize(18).font("Helvetica-Bold").text("CV. SUMBER ALODIE UTAMA", 90, 40);
+
+    // 2. Right Title "FORM ORDER BARANG" in a grey-blue rounded border box
+    const titleBoxWidth = 160;
+    const titleBoxHeight = 30;
+    doc.fillColor("#f1f5f9").roundedRect(565 - titleBoxWidth, 35, titleBoxWidth, titleBoxHeight, 5).fill();
+    doc.lineWidth(0.5).strokeColor("#cbd5e1").roundedRect(565 - titleBoxWidth, 35, titleBoxWidth, titleBoxHeight, 5).stroke();
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(11).text("FORM ORDER BARANG", 565 - titleBoxWidth, 44, { width: titleBoxWidth, align: "center" });
+
+    // 3. Thick divider line below logo and title
+    doc.moveTo(30, 80).lineTo(565, 80).lineWidth(2).strokeColor("#000000").stroke();
+
+    // 4. Two-column Metadata Grid
+    doc.lineWidth(0.5).fillColor("#000000").font("Helvetica").fontSize(9);
     
-    let curY = 200;
-    doc.font("Helvetica-Bold").text("Items list (Template Fallback):", 30, curY);
-    curY += 20;
-    data.items.forEach((item: any) => {
-      doc.font("Helvetica").text(`- ${item.itemName} (${item.qty} ${item.unit})`, 40, curY);
-      curY += 15;
-    });
+    // Column 1
+    doc.font("Helvetica-Bold").text("NAMA", 30, 95);
+    doc.font("Helvetica").text(`:  ${data.requester || "-"}`, 120, 95);
+
+    doc.font("Helvetica-Bold").text("TANGGAL ORDER", 30, 115);
+    doc.font("Helvetica").text(`:  ${data.date || "-"}`, 120, 115);
+
+    doc.font("Helvetica-Bold").text("DIVISI", 30, 135);
+    doc.font("Helvetica").text(`:  ${data.division || "-"}`, 120, 135);
+
+    doc.font("Helvetica-Bold").text("SUPPLIER", 30, 155);
+    doc.font("Helvetica").text(`:  ${data.supplier || "-"}`, 120, 155);
+
+    // Column 2
+    doc.font("Helvetica-Bold").text("NO. DOKUMEN", 320, 95);
+    doc.font("Helvetica").text(`:  ${prId}`, 400, 95);
+
+    doc.font("Helvetica-Bold").text("CATATAN", 320, 115);
     
-    curY += 20;
-    doc.font("Helvetica-Bold").text("Estimasi stock untuk penjualan:", 30, curY);
-    curY += 15;
-    data.items.forEach((item: any) => {
-      const avg = (Number(item.b1||0)+Number(item.b2||0)+Number(item.b3||0))/3;
-      const days = avg > 0 ? Math.round((Number(item.qty) * 30) / avg) : 0;
-      doc.font("Helvetica").text(`- ${item.itemName}: ${days} hari`, 40, curY);
-      curY += 15;
-    });
+    // Catatan border box
+    doc.rect(320, 127, 245, 45).lineWidth(0.5).strokeColor("#000000").stroke();
+    doc.font("Helvetica").text(data.notes || "-", 325, 132, { width: 235, height: 35 });
+
+    // 5. Divider text
+    doc.font("Helvetica").fontSize(10).fillColor("#000000").text("Detail permintaan barang sebagai berikut :", 30, 185);
+
+    // 6. Double-tier Header Table starting at Y = 205
+    let curY = 205;
+    
+    // Headers background
+    doc.rect(30, curY, 535, 30).fill("#f1c232"); // Yellow gold fill
+    doc.fillColor("#000000"); // Reset fill to black for text/lines
+    doc.lineWidth(0.5).strokeColor("#000000");
+
+    // Grid lines for Header
+    doc.moveTo(30, curY).lineTo(565, curY).stroke();
+    doc.moveTo(425, curY + 15).lineTo(565, curY + 15).stroke();
+    doc.moveTo(30, curY + 30).lineTo(565, curY + 30).stroke();
+    
+    doc.moveTo(30, curY).lineTo(30, curY + 30).stroke();
+    doc.moveTo(60, curY).lineTo(60, curY + 30).stroke();
+    doc.moveTo(245, curY).lineTo(245, curY + 30).stroke();
+    doc.moveTo(290, curY).lineTo(290, curY + 30).stroke();
+    doc.moveTo(330, curY).lineTo(330, curY + 30).stroke();
+    doc.moveTo(375, curY).lineTo(375, curY + 30).stroke();
+    doc.moveTo(425, curY).lineTo(425, curY + 30).stroke();
+    doc.moveTo(471, curY + 15).lineTo(471, curY + 30).stroke();
+    doc.moveTo(517, curY + 15).lineTo(517, curY + 30).stroke();
+    doc.moveTo(565, curY).lineTo(565, curY + 30).stroke();
+
+    // Header Texts
+    doc.font("Helvetica-Bold").fontSize(8.5);
+    doc.text("No.", 30, curY + 10, { width: 30, align: "center" });
+    doc.text("Nama Barang", 60, curY + 10, { width: 185, align: "center" });
+    doc.text("Satuan", 245, curY + 10, { width: 45, align: "center" });
+    
+    doc.fontSize(7.5);
+    doc.text("Qty\nOrder", 290, curY + 6, { width: 40, align: "center" });
+    doc.text("Stock\nOnHand", 330, curY + 6, { width: 45, align: "center" });
+    doc.text("Rata-rata\n3 Bulan", 375, curY + 6, { width: 50, align: "center" });
+    
+    doc.fontSize(8);
+    doc.text("Penjualan 3 Bulan Terakhir", 425, curY + 4, { width: 140, align: "center" });
+    doc.text("Bulan-1", 425, curY + 18, { width: 46, align: "center" });
+    doc.text("Bulan-2", 471, curY + 18, { width: 46, align: "center" });
+    doc.text("Bulan-3", 517, curY + 18, { width: 48, align: "center" });
+
+    // Table rows - Draw at least 10 rows
+    curY += 30;
+    doc.font("Helvetica").fontSize(8.5);
+    
+    const rowCount = Math.max(10, data.items.length);
+    const rowHeight = 20;
+    
+    for (let i = 0; i < rowCount; i++) {
+      const rowY = curY + i * rowHeight;
+      const item = data.items[i];
+      
+      const itemNo = item ? String(i + 1) : "";
+      const itemName = item ? String(item.itemName || "-") : "";
+      const unit = item ? String(item.unit || "-") : "";
+      const qty = item ? String(item.qty || "0") : "";
+      const stock = item ? String(item.stockOnhand || "0") : "";
+      const avg = item ? Number(item.avgSales || 0).toFixed(1) : "";
+      const b1 = item ? String(item.b1 || "0") : "";
+      const b2 = item ? String(item.b2 || "0") : "";
+      const b3 = item ? String(item.b3 || "0") : "";
+      
+      doc.moveTo(30, rowY).lineTo(30, rowY + rowHeight).stroke();
+      doc.moveTo(60, rowY).lineTo(60, rowY + rowHeight).stroke();
+      doc.moveTo(245, rowY).lineTo(245, rowY + rowHeight).stroke();
+      doc.moveTo(290, rowY).lineTo(290, rowY + rowHeight).stroke();
+      doc.moveTo(330, rowY).lineTo(330, rowY + rowHeight).stroke();
+      doc.moveTo(375, rowY).lineTo(375, rowY + rowHeight).stroke();
+      doc.moveTo(425, rowY).lineTo(425, rowY + rowHeight).stroke();
+      doc.moveTo(471, rowY).lineTo(471, rowY + rowHeight).stroke();
+      doc.moveTo(517, rowY).lineTo(517, rowY + rowHeight).stroke();
+      doc.moveTo(565, rowY).lineTo(565, rowY + rowHeight).stroke();
+      
+      doc.moveTo(30, rowY + rowHeight).lineTo(565, rowY + rowHeight).stroke();
+      
+      if (item) {
+        doc.text(itemNo, 30, rowY + 6, { width: 30, align: "center" });
+        doc.text(itemName, 65, rowY + 6, { width: 175, align: "left" });
+        doc.text(unit, 245, rowY + 6, { width: 45, align: "center" });
+        doc.text(qty, 290, rowY + 6, { width: 40, align: "center" });
+        doc.text(stock, 330, rowY + 6, { width: 45, align: "center" });
+        doc.text(avg, 375, rowY + 6, { width: 50, align: "center" });
+        doc.text(b1, 425, rowY + 6, { width: 46, align: "center" });
+        doc.text(b2, 471, rowY + 6, { width: 46, align: "center" });
+        doc.text(b3, 517, rowY + 6, { width: 48, align: "center" });
+      }
+    }
+    
+    // 7. GRAND TOTAL Row
+    const grandTotalY = curY + rowCount * rowHeight;
+    doc.rect(30, grandTotalY, 260, rowHeight).fill("#f1c232");
+    doc.fillColor("#000000");
+    
+    doc.rect(30, grandTotalY, 260, rowHeight).stroke();
+    doc.rect(290, grandTotalY, 40, rowHeight).stroke();
+    
+    doc.font("Helvetica-Bold").fontSize(8.5);
+    doc.text("GRAND TOTAL", 30, grandTotalY + 6, { width: 260, align: "center" });
+    doc.text(String(totalQty), 290, grandTotalY + 6, { width: 40, align: "center" });
+    
+    // 8. parenthesized stock estimation note below the table
+    const noteY = grandTotalY + rowHeight + 15;
+    doc.font("Helvetica").fontSize(9);
+    doc.text(estimasiText, 30, noteY, { width: 535 });
 
     doc.end();
     return new Promise((resolve, reject) => {
@@ -1015,6 +1161,142 @@ Jika layar menampilkan pesan "blocking a required security cookie":
   }
 }
 
+async function syncPrDetailRow(prId: string, auth: any) {
+  const sheets = getSheets(auth);
+  
+  try {
+    console.log(`[SYNC] Starting sync for PR ${prId}...`);
+    // 1. Fetch all Rekap_PR rows to collect details
+    const prRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: "Rekap_PR!A:S",
+    });
+    const prRows = prRes.data.values || [];
+    
+    const matchingPrRows = prRows.filter(row => row[0] && String(row[0]).trim() === String(prId).trim());
+    
+    // 2. Fetch all PR_Detail rows
+    const detailRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: "PR_Detail!A:N",
+    });
+    const detailRows = detailRes.data.values || [];
+    
+    const detailRowIndex = detailRows.findIndex(row => row[1] && String(row[1]).trim() === String(prId).trim());
+    
+    if (matchingPrRows.length === 0) {
+      // If PR was deleted in Rekap_PR, delete it from PR_Detail if it exists
+      if (detailRowIndex !== -1) {
+        const sheetId = await getSheetId("PR_Detail", auth);
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: SPREADSHEET_ID,
+          requestBody: {
+            requests: [
+              {
+                deleteDimension: {
+                  range: {
+                    sheetId: sheetId,
+                    dimension: "ROWS",
+                    startIndex: detailRowIndex,
+                    endIndex: detailRowIndex + 1
+                  }
+                }
+              }
+            ]
+          }
+        });
+        console.log(`[SYNC] Deleted PR ${prId} from PR_Detail since it has 0 items in Rekap_PR`);
+      }
+      return;
+    }
+    
+    // 3. Compile summary data
+    const firstRow = matchingPrRows[0];
+    const date = firstRow[1] || "";
+    const requester = firstRow[2] || "";
+    const division = firstRow[3] || "";
+    const supplier = firstRow[4] || "";
+    const notes = firstRow[10] || "";
+    const status = firstRow[11] || "";
+    const mgrApp = firstRow[12] || "";
+    const dirApp = firstRow[13] || "";
+    const pdfLink = firstRow[14] || "";
+    const poNo = firstRow[15] || "";
+    
+    const jumlahItem = matchingPrRows.length;
+    const totalQty = matchingPrRows.reduce((sum, row) => sum + (Number(row[7]) || 0), 0);
+    
+    // 4. Update or Append
+    if (detailRowIndex !== -1) {
+      // Update existing row (retain its existing ID PR in column A)
+      const existingId = detailRows[detailRowIndex][0] || `PRD${String(detailRowIndex).padStart(7, '0')}`;
+      const updatedValues = [
+        existingId,
+        prId,
+        date,
+        requester,
+        division,
+        supplier,
+        String(jumlahItem),
+        String(totalQty),
+        notes,
+        status,
+        mgrApp,
+        dirApp,
+        pdfLink,
+        poNo
+      ];
+      
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `PR_Detail!A${detailRowIndex + 1}:N${detailRowIndex + 1}`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [updatedValues] }
+      });
+      console.log(`[SYNC] Updated PR ${prId} in PR_Detail at row ${detailRowIndex + 1}`);
+    } else {
+      // Determine next ID PR
+      let nextIdNum = 1;
+      if (detailRows.length > 1) {
+        // Look at all ID PRs to find the max ID
+        const ids = detailRows.slice(1).map(row => {
+          const match = String(row[0]).match(/^PRD(\d+)/);
+          return match ? parseInt(match[1]) : 0;
+        });
+        nextIdNum = Math.max(...ids) + 1;
+      }
+      const newId = `PRD${String(nextIdNum).padStart(7, '0')}`;
+      
+      const newRow = [
+        newId,
+        prId,
+        date,
+        requester,
+        division,
+        supplier,
+        String(jumlahItem),
+        String(totalQty),
+        notes,
+        status,
+        mgrApp,
+        dirApp,
+        pdfLink,
+        poNo
+      ];
+      
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: "PR_Detail!A:N",
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [newRow] }
+      });
+      console.log(`[SYNC] Appended new PR ${prId} to PR_Detail as ${newId}`);
+    }
+  } catch (err: any) {
+    console.error(`[SYNC] Error syncing PR ${prId} to PR_Detail: ${err.message}`);
+  }
+}
+
 // API: Login (Real-time from Spreadsheet)
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
@@ -1303,6 +1585,9 @@ app.post(["/api/pr", "/api/pr/create"], async (req, res) => {
         values: rowsToAppend
       }
     });
+
+    // Synchronize to PR_Detail summary sheet
+    await syncPrDetailRow(prId, auth);
     
     // Create real PDF
     await createPrPdf(prId, {
@@ -1341,6 +1626,8 @@ app.post(["/api/pr", "/api/pr/create"], async (req, res) => {
                         console.log(`[PR] Updated link for ${prId} on row ${i + 1} with Drive link: ${driveLink}`);
                     }
                 }
+                // Sync to PR_Detail after updating PDF link
+                await syncPrDetailRow(prId, auth);
             } catch (sheetErr: any) {
                 console.error(`[PR] Failed to update Sheets with Google Drive link:`, sheetErr.message);
             }
@@ -1363,6 +1650,8 @@ app.post(["/api/pr", "/api/pr/create"], async (req, res) => {
                         console.log(`[PR] Updated link for ${prId} on row ${i + 1} with local absolute fallback URL`);
                     }
                 }
+                // Sync to PR_Detail after updating PDF link
+                await syncPrDetailRow(prId, auth);
             } catch (sheetErr: any) {
                 console.error(`[PR] Failed to update Sheets with fallback absolute link:`, sheetErr.message);
             }
@@ -1670,6 +1959,9 @@ app.post("/api/pr/approve", async (req, res) => {
       console.error("[WHATSAPP] Approval notification failed:", err.message);
     });
 
+    // Sync with PR_Detail summary sheet
+    await syncPrDetailRow(prId, auth);
+
     res.json({ success: true });
   } catch (error: any) {
     handleApiError(res, error, "APPROVE");
@@ -1849,6 +2141,9 @@ app.post(["/api/po", "/api/po/create"], async (req, res) => {
       }
     });
 
+    // Sync with PR_Detail summary sheet
+    await syncPrDetailRow(prId, auth);
+
     res.json({ success: true, poNo, pdfLink: poPdfUrl });
   } catch (error: any) {
     handleApiError(res, error, "PO_CREATE");
@@ -1878,6 +2173,9 @@ app.post("/api/pr/finish", async (req, res) => {
         requestBody: { values: [["FINISH"]] }
       });
     }
+    // Sync with PR_Detail summary sheet
+    await syncPrDetailRow(prId, auth);
+
     res.json({ success: true });
   } catch (error: any) {
     handleApiError(res, error, "PR_FINISH");
@@ -1951,6 +2249,9 @@ app.put("/api/pr/:index", async (req, res) => {
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [[b1, b2, b3]] }
     });
+
+    // Sync with PR_Detail summary sheet
+    await syncPrDetailRow(prId, auth);
 
     res.json({ success: true });
   } catch (error: any) { 
@@ -2091,12 +2392,27 @@ app.delete("/api/admin/pr/:index", async (req, res) => {
     const auth = getAuthFromRequest(req);
     const sheets = getSheets(auth);
     const index = parseInt(req.params.index);
+
+    // Fetch the PR ID of the row before we delete it
+    const rowRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Rekap_PR!A${index}:A${index}`,
+    });
+    const prId = rowRes.data.values?.[0]?.[0];
+
+    // Delete the row from Rekap_PR
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
         requests: [{ deleteDimension: { range: { sheetId: (await getSheetId("Rekap_PR", auth)), dimension: "ROWS", startIndex: index - 1, endIndex: index } } }]
       }
     });
+
+    // Sync with PR_Detail summary sheet
+    if (prId) {
+      await syncPrDetailRow(prId, auth);
+    }
+
     res.json({ success: true });
   } catch (error: any) {
     handleApiError(res, error, "ADMIN_PR_DELETE");

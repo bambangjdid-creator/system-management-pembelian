@@ -44,26 +44,27 @@ const getAuthClient = () => {
 };
 
 async function test() {
-  console.log("Starting authentication test...");
-  console.log("Email:", process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+  console.log("Starting sheet inspection...");
   try {
     const auth = getAuthClient();
-    console.log("Auth client created, requesting access token...");
-    const token = await auth.getAccessToken();
-    console.log("Success! Access token retrieved.");
-    
-    // Attempt a simple call to the spreadsheet
     const sheets = google.sheets({ version: "v4", auth });
-    console.log("Testing Spreadsheet access for ID: 1Ne5xeN2zEmScf9CVX5x9WguQZPM0Vk6dzQJ-n7xRfWU...");
-    const response = await sheets.spreadsheets.get({
-      spreadsheetId: "1Ne5xeN2zEmScf9CVX5x9WguQZPM0Vk6dzQJ-n7xRfWU",
-    });
-    console.log("Successfully connected to Spreadsheet! Title:", response.data.properties?.title);
+    const spreadsheetId = "1Ne5xeN2zEmScf9CVX5x9WguQZPM0Vk6dzQJ-n7xRfWU";
+    
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    console.log("Sheet names:");
+    const sheetNames = meta.data.sheets?.map(s => s.properties?.title) || [];
+    console.log(sheetNames);
+    
+    for (const name of sheetNames) {
+      console.log(`\n--- Sheet: ${name} ---`);
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${name}!A1:Z5`,
+      });
+      console.log("Rows:", res.data.values);
+    }
   } catch (err: any) {
-    console.error("Test failed!");
-    console.error("Error Message:", err.message);
-    console.error("Error Code / Status:", err.code || err.response?.status);
-    console.error("Full Error object:", JSON.stringify(err, null, 2));
+    console.error("Failed to inspect sheets:", err.message);
   }
 }
 
