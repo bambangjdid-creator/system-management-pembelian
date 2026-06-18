@@ -237,59 +237,45 @@ export default function App() {
   const calculateAvg = (item) => (Number(item.b1) + Number(item.b2) + Number(item.b3)) / 3;
 
   const apiFetch = async (url, options: any = {}) => {
-    let finalUrl = url;
-    const method = (options.method || 'GET').toUpperCase();
-    if (method === 'GET') {
-      const separator = url.includes('?') ? '&' : '?';
-      finalUrl = `${url}${separator}_t=${Date.now()}`;
+    // === GOOGLE APPS SCRIPT WEB APP INTEGRATION ===
+    // Replace this URL with your actual deployed Web App URL from Google Apps Script
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbwnqXkuqQEihqleNJ1DaAEukSaPMAVI9cIjvcKg9Ok6qlquPSbdwK1lyHGNPJ_Vih09/exec";
+    
+    let action = "";
+    if (url.includes("/login")) action = "login";
+    else if (url.includes("/admin/users")) action = "getUsers";
+    else if (url.includes("/admin/stock")) action = "getMasterStock";
+    else if (url.includes("/pr/create")) action = "createPR";
+    else if (url.includes("/po/create")) action = "createPO";
+    else if (url.includes("/pr/approve")) action = "approvePR";
+    else if (url.includes("/pr/finish")) action = "finishPR";
+    else if (url.includes("/pr")) action = "getPRs";
+    else if (url.includes("/po")) action = "getPOs";
+    else if (url.includes("/stock")) action = "getMasterStock";
+
+    if (!action) {
+      if (url.includes("/stats")) {
+          return { json: async () => ({ success: true, stats: { totalPr:0, totalPo:0, pendingApprove:0 } }) };
+      }
+      return { json: async () => ({ success: true }) };
     }
 
-    const headers = {
-      ...options.headers,
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    };
-    if (googleToken) {
-      headers['Authorization'] = `Bearer ${googleToken}`;
-    }
-    
     try {
-        let response = await fetch(finalUrl, { ...options, headers });
-        
-        // Check for the custom token-expired header that indicates a transparent Service Account fallback occurred
-        const tokenExpiredHeader = response.headers.get("X-Google-Token-Expired") === "true";
-        
-        if ((response.status === 401 || tokenExpiredHeader) && googleToken) {
-            setGoogleToken(null);
-            safeLocalStorage.removeItem('google_token');
-            console.warn("Google token expired or invalid. Client cleared it to avoid loop.");
-            
-            // If it was a 401, we need to retry transparently. If it had the header, the request ALREADY succeeded in the backend via fallback, so no retry is needed!
-            if (response.status === 401) {
-                const retryHeaders = { ...headers };
-                delete retryHeaders['Authorization'];
-                response = await fetch(finalUrl, { ...options, headers: retryHeaders });
-            }
-            
-            // Show a non-blocking toast to notify the user of fallback
-            const Toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 4000,
-                timerProgressBar: true,
-            });
-            Toast.fire({
-                icon: 'info',
-                title: 'Sesi Google Berakhir',
-                text: 'Sistem otomatis beralih menggunakan Kredensial Service Account.'
-            });
-        }
-        
-        return response;
-    } catch (error) {
-        throw error;
+      const payload = { action, ...((options.body && JSON.parse(options.body)) || {}) };
+      
+      const response = await fetch(GAS_URL, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await response.json();
+      return {
+        ok: data.success !== false,
+        json: async () => data
+      };
+    } catch (e) {
+      console.error("GAS API Error:", e);
+      throw e;
     }
   };
 

@@ -11,7 +11,7 @@ dotenv.config();
 import PDFDocument from "pdfkit";
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const PDF_DIR = path.join(process.cwd(), "PR_PDF");
 const PO_PDF_DIR = path.join(process.cwd(), "PO_PDF");
 
