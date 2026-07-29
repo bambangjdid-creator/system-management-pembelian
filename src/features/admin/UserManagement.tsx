@@ -25,6 +25,7 @@ export default function UserManagement({ users, onAddUser, onEditUser, onDeleteU
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Role</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Div Code</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">WA</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Telegram ID</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Access</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase">Actions</th>
             </tr>
@@ -38,6 +39,7 @@ export default function UserManagement({ users, onAddUser, onEditUser, onDeleteU
                 <td className="px-6 py-4"><span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase">{u.role}</span></td>
                 <td className="px-6 py-4 text-slate-600 text-[10px] font-bold">{u.divCode || u.divisionCode}</td>
                 <td className="px-6 py-4 text-slate-600 text-[10px]">{u.wa}</td>
+                <td className="px-6 py-4 text-slate-600 text-[10px]">{u.telegramChatId || '-'}</td>
                 <td className="px-6 py-4">
                   <div className="flex flex-wrap gap-1 max-w-[150px]">
                     {(u.access || '').split(',').filter(Boolean).map((a: string) => (
