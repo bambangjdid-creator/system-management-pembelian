@@ -520,6 +520,32 @@ app.use("/api/admin", requireAdmin);
 app.use(["/api/wa-diagnostics", "/api/wa-save-token", "/api/wa-test-send"], requireAdmin);
 app.use("/api/admin/telegram/diagnostics", requireAdmin);
 
+app.post("/api/admin/telegram/send-test-message", requireAdmin, async (req, res) => {
+  const { chatId, message } = req.body;
+
+  if (!chatId || !message) {
+    return res.status(400).json({ success: false, message: "chatId and message are required." });
+  }
+
+  try {
+    console.log(`[TELEGRAM] Sending test message to Chat ID: ${chatId}`);
+    const result = await sendTelegramRequest("sendMessage", {
+      chat_id: chatId,
+      text: message,
+      parse_mode: "Markdown"
+    });
+    
+    if (result && result.ok) {
+      res.json({ success: true, log: result });
+    } else {
+      res.status(400).json({ success: false, log: result, message: "Failed to send message via Telegram API." });
+    }
+  } catch (error: any) {
+    handleApiError(res, error, "TELEGRAM_SEND_TEST");
+  }
+});
+
+
 // Modified helpers to accept auth
 async function createPrPdf(prId: string, data: any, auth: any) {
   const fileName = `${prId.replace(/\//g, "_")}.pdf`;
