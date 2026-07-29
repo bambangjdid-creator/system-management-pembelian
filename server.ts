@@ -2836,7 +2836,7 @@ app.get("/api/admin/telegram/diagnostics", async (req, res) => {
   }
 });
 
-app.post("/api/admin/telegram/send-test", async (req, res) => {
+app.post("/api/admin/telegram/send-test-message", async (req, res) => {
   if (!TELEGRAM_BOT_TOKEN) {
     return res.status(400).json({ success: false, message: "Telegram Bot Token is not configured." });
   }
@@ -2849,15 +2849,16 @@ app.post("/api/admin/telegram/send-test", async (req, res) => {
     const response = await sendTelegramRequest("sendMessage", {
       chat_id: chatId,
       text: message,
+      parse_mode: "Markdown",
     });
 
     if (response && response.ok) {
-      return res.json({ success: true, message: `Message sent successfully to Chat ID: ${chatId}`, details: response });
+      return res.json({ success: true, log: response, message: `Message sent successfully to Chat ID: ${chatId}` });
     } else {
-      return res.status(500).json({ success: false, message: "Failed to send message via Telegram.", details: response });
+      return res.status(500).json({ success: false, log: response, message: "Failed to send message via Telegram." });
     }
   } catch (error: any) {
-    res.status(500).json({ success: false, message: `An exception occurred: ${error.message}` });
+    res.status(500).json({ success: false, error: error.message, message: `An exception occurred: ${error.message}` });
   }
 });
 
