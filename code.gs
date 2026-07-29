@@ -100,7 +100,8 @@ function doLogin(username, password) {
           divisionCode: data[i][4],
           wa: data[i][5],
           role: data[i][6],
-          access: data[i][7]
+          access: data[i][7],
+          telegramChatId: data[i][8] || ''
         }
       };
     }
@@ -124,7 +125,8 @@ function getUsers() {
       divCode: data[i][4],
       wa: data[i][5],
       role: data[i][6],
-      access: data[i][7]
+      access: data[i][7],
+      telegramChatId: data[i][8] || ''
     });
   }
   return { success: true, data: users };

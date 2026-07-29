@@ -1,6 +1,7 @@
 export type Role = 'USER' | 'Manager' | 'Direktur' | 'Purchase' | 'ADMIN' | string;
 
 export interface AppUser {
+  id?: number;
   username: string;
   displayName?: string;
   fullName?: string;
@@ -10,6 +11,7 @@ export interface AppUser {
   wa?: string;
   role?: Role;
   access?: string;
+  telegramChatId?: string;
   hasPassword?: boolean;
 }
 

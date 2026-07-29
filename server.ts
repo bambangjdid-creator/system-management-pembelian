@@ -46,6 +46,8 @@ const TEMPLATE_PO_ID = requireEnv("TEMPLATE_PO_ID");
 const SESSION_SECRET = requireSecret("JWT_SECRET", 32);
 const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 8 * 60 * 60);
 const APP_BASE_URL = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL || "";
 
 if (!Number.isFinite(SESSION_TTL_SECONDS) || SESSION_TTL_SECONDS < 300) {
   throw new Error("SESSION_TTL_SECONDS must be a number >= 300");
@@ -503,13 +505,14 @@ function sanitizePublicUser(row: any[], index?: number) {
     wa: row[5] || "",
     role: row[6] || "USER",
     access: row[7] || "",
+    telegramChatId: row[8] || "",
     hasPassword: Boolean(row[1]),
   };
 }
 
 // Require a signed app session for every API except login and public PDF links.
 app.use("/api", (req, res, next) => {
-  if (req.path === "/login" || req.path.startsWith("/pdf/")) return next();
+  if (req.path === "/login" || req.path.startsWith("/pdf/") || req.path === "/telegram/webhook" || req.path === "/telegram/setup-webhook") return next();
   return requireSession(req, res, next);
 });
 
@@ -1034,7 +1037,7 @@ async function getNotificationUsers() {
     const sheets = getSheets(auth);
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "User_Role!A2:H",
+      range: "User_Role!A2:I",
     });
     const rows = response.data.values || [];
     
@@ -1044,13 +1047,14 @@ async function getNotificationUsers() {
       division: row[3],
       divisionCode: String(row[4] || "").toUpperCase().trim(),
       wa: row[5],
-      role: String(row[6] || "").toUpperCase().trim()
+      role: String(row[6] || "").toUpperCase().trim(),
+      telegramChatId: row[8] || ""
     }));
 
-    console.log(`[WHATSAPP] Mapped ${mappedUsers.length} users from User_Role table`);
+    console.log(`[WHATSAPP/TELEGRAM] Mapped ${mappedUsers.length} users from User_Role table`);
     return mappedUsers;
   } catch (err: any) {
-    console.error(`[WHATSAPP] Failed to fetch users for notifications: ${err.message}`);
+    console.error(`[WHATSAPP/TELEGRAM] Failed to fetch users for notifications: ${err.message}`);
     return [];
   }
 }
@@ -1344,6 +1348,141 @@ Jika layar menampilkan pesan "blocking a required security cookie":
   }
 }
 
+async function sendTelegramRequest(methodName: string, payload: any) {
+  if (!TELEGRAM_BOT_TOKEN) return null;
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${methodName}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result: any = await res.json();
+    if (!result.ok) {
+      console.error(`[TELEGRAM] API Error:`, result);
+    }
+    return result;
+  } catch (err: any) {
+    console.error(`[TELEGRAM] Request failed for ${methodName}:`, err.message);
+    return null;
+  }
+}
+
+async function notifyNewPRTelegram(prId: string, data: any) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  try {
+    const users = await getNotificationUsers();
+    
+    const isManagerOnly = (role: string) => {
+      const r = String(role || "").toUpperCase();
+      return (r.includes("MANAGER") || r.includes("MANAJER") || r.includes("MGR") || r.includes("KABAG") || r.includes("KADIV")) && 
+             !(r.includes("DIREKTUR") || r.includes("DIREKSI") || r.includes("DIR"));
+    };
+
+    const prDivision = String(data.division || "").toUpperCase().trim();
+    let targetManagerDivision = "";
+    if (prDivision.includes("CIRACAS") || prDivision === "GDC") {
+      targetManagerDivision = "TOKO";
+    } else if (prDivision.includes("PONCOL") || prDivision.includes("NAGOYA") || prDivision === "GDP" || prDivision === "GDN") {
+      targetManagerDivision = "GUDANG";
+    }
+
+    let recipients = users.filter(u => u.telegramChatId && isManagerOnly(u.role));
+    
+    if (targetManagerDivision) {
+      recipients = recipients.filter(u => {
+        const uDiv = String(u.division || "").toUpperCase().trim();
+        const uDivCode = String(u.divisionCode || "").toUpperCase().trim();
+        return uDiv.includes(targetManagerDivision) || uDivCode.includes(targetManagerDivision);
+      });
+    }
+
+    if (recipients.length === 0) {
+      console.log(`[TELEGRAM] No active Managers with Telegram Chat ID found for PR ${prId}`);
+      return;
+    }
+
+    const firstItemAndQty = data.items && data.items.length > 0
+      ? `${data.items[0].itemName} (Qty: ${data.items[0].qty})`
+      : "";
+    const itemsCount = data.items ? data.items.length : 0;
+    const itemSummary = itemsCount > 1 
+      ? `${firstItemAndQty} + ${itemsCount - 1} item lainnya`
+      : firstItemAndQty;
+
+    console.log(`[TELEGRAM] Found ${recipients.length} Manager recipients to notify for PR ${prId}`);
+    
+    for (const user of recipients) {
+      const message = `🔔 *Notifikasi PR Baru* 🔔\n\nHalo *${user.displayName}*, ada Purchase Request baru yang memerlukan tinjauan Anda:\n\n*No. PR*: ${prId}\n*Peminta*: ${data.requester}\n*Divisi*: ${data.division}\n*Supplier*: ${data.supplier}\n*Detail Item*: ${itemSummary}\n*Catatan*: ${data.notes || "-"}\n\nSilakan klik tombol di bawah untuk menyetujui atau menolak langsung dari Telegram:`;
+      
+      await sendTelegramRequest("sendMessage", {
+        chat_id: user.telegramChatId,
+        text: message,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Setujui (Approve)", callback_data: `approve_pr:${prId}` },
+              { text: "❌ Tolak (Reject)", callback_data: `reject_pr:${prId}` }
+            ]
+          ]
+        }
+      });
+    }
+  } catch (err: any) {
+    console.error(`[TELEGRAM] Error in notifyNewPRTelegram: ${err.message}`);
+  }
+}
+
+async function notifyDirekturPRTelegram(prId: string, prDetails: any, approverName: string) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  try {
+    const users = await getNotificationUsers();
+    
+    const isDirekturOnly = (role: string) => {
+      const r = String(role || "").toUpperCase();
+      return r.includes("DIREKTUR") || r.includes("DIREKSI") || r.includes("DIR");
+    };
+
+    const recipients = users.filter(u => u.telegramChatId && isDirekturOnly(u.role));
+
+    if (recipients.length === 0) {
+      console.log(`[TELEGRAM] No active Directors with Telegram Chat ID found for PR ${prId}`);
+      return;
+    }
+
+    const firstItemAndQty = prDetails.items && prDetails.items.length > 0
+      ? `${prDetails.items[0].itemName} (Qty: ${prDetails.items[0].qty})`
+      : "";
+    const itemsCount = prDetails.items ? prDetails.items.length : 0;
+    const itemSummary = itemsCount > 1 
+      ? `${firstItemAndQty} + ${itemsCount - 1} item lainnya`
+      : firstItemAndQty;
+
+    console.log(`[TELEGRAM] Found ${recipients.length} Director recipients to notify for PR ${prId}`);
+    
+    for (const user of recipients) {
+      const message = `🔔 *Notifikasi Persetujuan Direktur* 🔔\n\nHalo Bapak *${user.displayName}*, ada Purchase Request yang telah disetujui oleh Manager (*${approverName}*) dan sekarang memerlukan persetujuan Bapak:\n\n*No. PR*: ${prId}\n*Peminta*: ${prDetails.requester}\n*Divisi*: ${prDetails.division}\n*Supplier*: ${prDetails.supplier}\n*Detail Item*: ${itemSummary}\n*Catatan*: ${prDetails.notes || "-"}\n\nSilakan klik tombol di bawah untuk menyetujui atau menolak langsung dari Telegram:`;
+      
+      await sendTelegramRequest("sendMessage", {
+        chat_id: user.telegramChatId,
+        text: message,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Setujui (Approve)", callback_data: `approve_pr:${prId}` },
+              { text: "❌ Tolak (Reject)", callback_data: `reject_pr:${prId}` }
+            ]
+          ]
+        }
+      });
+    }
+  } catch (err: any) {
+    console.error(`[TELEGRAM] Error in notifyDirekturPRTelegram: ${err.message}`);
+  }
+}
+
 async function notifyPRApprovalChange(
   prId: string,
   approverName: string,
@@ -1445,7 +1584,7 @@ app.post("/api/login", async (req, res) => {
     const sheets = getSheets(auth);
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: "User_Role!A2:H",
+      range: "User_Role!A2:I",
     });
     const rows = response.data.values || [];
 
@@ -2053,6 +2192,10 @@ app.post(["/api/pr", "/api/pr/create"], requirePermission("CREATE PR"), async (r
       console.error("[WHATSAPP] New PR notification failed:", err.message);
     });
 
+    notifyNewPRTelegram(prId, { ...req.body, requester, division, divCode, items }).catch(err => {
+      console.error("[TELEGRAM] New PR notification failed:", err.message);
+    });
+
     res.json({ success: true, pr: { id: prId, pdfLink: pdfUrl } });
   } catch (error: any) {
     handleApiError(res, error, "PR_CREATE_NORMALIZED");
@@ -2099,13 +2242,15 @@ app.post("/api/pr/approve", requireRoles(["MANAGER", "MANAJER", "MGR", "KABAG", 
 
     const matchingDetails = details.filter(d => d.prId === prId);
     if (newStatus === "WAITING DIREKTUR APPROVAL") {
-      notifyDirekturPR(prId, {
+      const prData = {
         requester: header.requester,
         division: header.division,
         supplier: header.supplier,
         notes: header.notes,
         items: matchingDetails.map(d => ({ itemName: d.itemName, qty: d.qty })),
-      }, user, req).catch(err => console.error("[WHATSAPP] Direktur approval notification failed:", err.message));
+      };
+      notifyDirekturPR(prId, prData, user, req).catch(err => console.error("[WHATSAPP] Direktur approval notification failed:", err.message));
+      notifyDirekturPRTelegram(prId, prData, user).catch(err => console.error("[TELEGRAM] Direktur approval notification failed:", err.message));
     }
 
     notifyPRApprovalChange(prId, user, role, newStatus, action === "REJECT", reason, header.requester, req)
@@ -2382,7 +2527,7 @@ app.get("/api/admin/users", async (req, res) => {
   try {
     const auth = getAuthFromRequest(req);
     const sheets = getSheets(auth);
-    const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "User_Role!A2:H" });
+    const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "User_Role!A2:I" });
     const rows = response.data.values || [];
     // Do not expose password hashes or legacy plaintext passwords to the client.
     res.json(rows.map((r, i) => sanitizePublicUser(r, i)));
@@ -2395,15 +2540,15 @@ app.post("/api/admin/users", async (req, res) => {
   try {
     const auth = getAuthFromRequest(req);
     const sheets = getSheets(auth);
-    const { username, password, fullName, division, divCode, wa, role, access } = req.body;
+    const { username, password, fullName, division, divCode, wa, role, access, telegramChatId } = req.body;
     if (!String(username || "").trim() || !String(password || "")) {
       return res.status(400).json({ success: false, message: "Username dan password wajib diisi." });
     }
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "User_Role!A:H",
+      range: "User_Role!A:I",
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[username, hashPassword(String(password)), fullName, division, divCode, wa, role, access]] }
+      requestBody: { values: [[username, hashPassword(String(password)), fullName, division, divCode, wa, role, access, telegramChatId || ""]] }
     });
     res.json({ success: true });
   } catch (error: any) {
@@ -2433,23 +2578,208 @@ app.put("/api/admin/users/:index", async (req, res) => {
     const auth = getAuthFromRequest(req);
     const sheets = getSheets(auth);
     const index = parseInt(req.params.index);
-    const { username, password, fullName, division, divCode, wa, role, access } = req.body;
+    const { username, password, fullName, division, divCode, wa, role, access, telegramChatId } = req.body;
     const currentRowRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `User_Role!A${index}:H${index}`,
+      range: `User_Role!A${index}:I${index}`,
     });
     const currentRow = currentRowRes.data.values?.[0] || [];
     const existingPassword = String(currentRow[1] || "");
     const passwordToStore = String(password || "") ? hashPassword(String(password)) : existingPassword;
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range: `User_Role!A${index}:H${index}`,
+      range: `User_Role!A${index}:I${index}`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[username, passwordToStore, fullName, division, divCode, wa, role, access]] }
+      requestBody: { values: [[username, passwordToStore, fullName, division, divCode, wa, role, access, telegramChatId || ""]] }
     });
     res.json({ success: true });
   } catch (error: any) {
     handleApiError(res, error, "ADMIN_USERS_PUT");
+  }
+});
+
+// 1.5. Telegram Bot Webhook & Setup
+app.post("/api/telegram/webhook", async (req, res) => {
+  // Always respond 200 OK to Telegram quickly
+  res.sendStatus(200);
+
+  const { callback_query } = req.body;
+  if (callback_query) {
+    const chat = callback_query.message.chat;
+    const chatId = String(chat.id);
+    const callbackData = callback_query.data || "";
+    const messageId = callback_query.message.message_id;
+    const currentText = callback_query.message.text || "";
+    
+    // 1. Identify User by Telegram Chat ID
+    const users = await getNotificationUsers();
+    const user = users.find(u => String(u.telegramChatId) === chatId);
+    if (!user) {
+      await sendTelegramRequest("answerCallbackQuery", {
+        callback_query_id: callback_query.id,
+        text: "Akun Telegram Anda belum terdaftar di User_Role spreadsheet.",
+        show_alert: true
+      });
+      return;
+    }
+    
+    // 2. Parse Action and PR ID (format: "approve_pr:PB-0000000001-26")
+    const parts = callbackData.split(":");
+    if (parts.length < 2) return;
+    const actionType = parts[0]; // "approve_pr" or "reject_pr"
+    const prId = parts[1];
+    
+    try {
+      const auth = getAuthClient();
+      const { headers, details } = await loadPrHeaderDetail(auth);
+      const header = headers.find(h => h.prId === prId);
+      
+      if (!header) {
+        await sendTelegramRequest("answerCallbackQuery", {
+          callback_query_id: callback_query.id,
+          text: "PR tidak ditemukan.",
+          show_alert: true
+        });
+        return;
+      }
+      
+      const roleUp = String(user.role).toUpperCase();
+      const statusUp = String(header.status).toUpperCase();
+      
+      const isManager = roleUp.includes("MANAGER") || roleUp.includes("MGR");
+      const isDirector = roleUp.includes("DIREKTUR") || roleUp.includes("DIR");
+      
+      if (actionType === "approve_pr") {
+        let isValid = false;
+        let newStatus = "";
+        let approverCol = "";
+        
+        if (isManager && statusUp === "WAITING MANAGER APPROVAL") {
+          isValid = true;
+          newStatus = "WAITING DIREKTUR APPROVAL";
+          approverCol = "H";
+        } else if (isDirector && statusUp === "WAITING DIREKTUR APPROVAL") {
+          isValid = true;
+          newStatus = "WAITING CREATED PO";
+          approverCol = "I";
+        } else if (roleUp.includes("ADMIN")) {
+          isValid = true;
+          if (statusUp === "WAITING MANAGER APPROVAL") {
+            newStatus = "WAITING DIREKTUR APPROVAL";
+            approverCol = "H";
+          } else {
+            newStatus = "WAITING CREATED PO";
+            approverCol = "I";
+          }
+        }
+        
+        if (!isValid) {
+          await sendTelegramRequest("answerCallbackQuery", {
+            callback_query_id: callback_query.id,
+            text: `Gagal: Status PR saat ini adalah "${header.status}".`,
+            show_alert: true
+          });
+          return;
+        }
+        
+        // Update Sheet Status & Approver Name
+        await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!G${header.rowIndex}`, [[newStatus]]);
+        await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!${approverCol}${header.rowIndex}`, [[`${user.displayName} (Telegram)`]]);
+        
+        // Answer Callback Query
+        await sendTelegramRequest("answerCallbackQuery", {
+          callback_query_id: callback_query.id,
+          text: `PR ${prId} berhasil disetujui!`
+        });
+        
+        // Update Telegram Message
+        const updatedText = `${currentText}\n\n✅ *Status: Disetujui oleh ${user.displayName}*`;
+        await sendTelegramRequest("editMessageText", {
+          chat_id: chatId,
+          message_id: messageId,
+          text: updatedText,
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: [] }
+        });
+        
+        // Trigger next notifications if WAITING DIREKTUR APPROVAL
+        const matchingDetails = details.filter(d => d.prId === prId);
+        if (newStatus === "WAITING DIREKTUR APPROVAL") {
+          const prData = {
+            requester: header.requester,
+            division: header.division,
+            supplier: header.supplier,
+            notes: header.notes,
+            items: matchingDetails.map(d => ({ itemName: d.itemName, qty: d.qty })),
+          };
+          
+          notifyDirekturPR(prId, prData, user.displayName).catch(err => 
+            console.error("[WHATSAPP] Director notification failed:", err.message)
+          );
+          
+          notifyDirekturPRTelegram(prId, prData, user.displayName).catch(err => 
+            console.error("[TELEGRAM] Director notification failed:", err.message)
+          );
+        }
+        
+      } else if (actionType === "reject_pr") {
+        const isValid = isManager || isDirector || roleUp.includes("ADMIN");
+        if (!isValid) {
+          await sendTelegramRequest("answerCallbackQuery", {
+            callback_query_id: callback_query.id,
+            text: "Anda tidak memiliki wewenang untuk menolak PR ini.",
+            show_alert: true
+          });
+          return;
+        }
+        
+        // Update Status to Rejected
+        await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!G${header.rowIndex}`, [["Rejected"]]);
+        await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!F${header.rowIndex}`, [[`${header.notes || ""} | REJECTED via Telegram oleh ${user.displayName}`]]);
+        
+        // Answer Callback Query
+        await sendTelegramRequest("answerCallbackQuery", {
+          callback_query_id: callback_query.id,
+          text: `PR ${prId} ditolak!`
+        });
+        
+        // Update Telegram Message
+        const updatedText = `${currentText}\n\n❌ *Status: Ditolak oleh ${user.displayName}*`;
+        await sendTelegramRequest("editMessageText", {
+          chat_id: chatId,
+          message_id: messageId,
+          text: updatedText,
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: [] }
+        });
+      }
+      
+    } catch (err: any) {
+      console.error("[TELEGRAM] Webhook callback processing error:", err.message);
+      await sendTelegramRequest("answerCallbackQuery", {
+        callback_query_id: callback_query.id,
+        text: "Terjadi kesalahan sistem saat memproses approval.",
+        show_alert: true
+      });
+    }
+  }
+});
+
+app.get("/api/telegram/setup-webhook", async (req, res) => {
+  try {
+    if (!TELEGRAM_BOT_TOKEN) {
+      return res.status(400).json({ success: false, message: "TELEGRAM_BOT_TOKEN is not configured in environment variables." });
+    }
+    const targetUrl = TELEGRAM_WEBHOOK_URL || `${getAppUrl(req)}/api/telegram/webhook`;
+    console.log(`[TELEGRAM] Registering webhook URL: ${targetUrl}`);
+    const response = await sendTelegramRequest("setWebhook", { url: targetUrl });
+    if (response && response.ok) {
+      return res.json({ success: true, message: `Webhook registered successfully to: ${targetUrl}`, details: response });
+    } else {
+      return res.status(500).json({ success: false, message: "Failed to register webhook with Telegram.", details: response });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 

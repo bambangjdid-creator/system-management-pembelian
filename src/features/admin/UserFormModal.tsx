@@ -14,6 +14,7 @@ type UserForm = {
   divCode: string;
   wa: string;
   access: string;
+  telegramChatId: string;
 };
 
 type Props = {
@@ -34,6 +35,7 @@ const emptyForm: UserForm = {
   divCode: '',
   wa: '',
   access: '',
+  telegramChatId: '',
 };
 
 export default function UserFormModal({ open, mode, user, isSubmitting, onClose, onSubmit }: Props) {
@@ -51,6 +53,7 @@ export default function UserFormModal({ open, mode, user, isSubmitting, onClose,
         divCode: user.divCode || user.divisionCode || '',
         wa: user.wa || '',
         access: user.access || '',
+        telegramChatId: user.telegramChatId || '',
       });
     } else {
       setForm(emptyForm);
@@ -101,9 +104,13 @@ export default function UserFormModal({ open, mode, user, isSubmitting, onClose,
             <span className="text-[10px] font-black uppercase text-slate-400">Division Code</span>
             <input className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" value={form.divCode} onChange={e => setForm({ ...form, divCode: e.target.value })} />
           </label>
-          <label className="space-y-1 md:col-span-2">
+          <label className="space-y-1">
             <span className="text-[10px] font-black uppercase text-slate-400">WhatsApp Number</span>
             <input className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" placeholder="628..." value={form.wa} onChange={e => setForm({ ...form, wa: e.target.value })} />
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase text-slate-400">Telegram Chat ID</span>
+            <input className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm" placeholder="e.g. 123456789" value={form.telegramChatId} onChange={e => setForm({ ...form, telegramChatId: e.target.value })} />
           </label>
         </div>
 
