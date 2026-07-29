@@ -5,25 +5,119 @@ import cors from "cors";
 import { google } from "googleapis";
 import dotenv from "dotenv";
 import fs from "fs";
+import crypto from "crypto";
 
 dotenv.config();
 
 import PDFDocument from "pdfkit";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+
+const isProduction = process.env.NODE_ENV === "production";
+const PORT = Number(process.env.PORT || 3000);
 const PDF_DIR = path.join(process.cwd(), "PR_PDF");
 const PO_PDF_DIR = path.join(process.cwd(), "PO_PDF");
 
-if (!fs.existsSync(PDF_DIR)) {
-  fs.mkdirSync(PDF_DIR);
-}
-if (!fs.existsSync(PO_PDF_DIR)) {
-  fs.mkdirSync(PO_PDF_DIR);
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value || value.toLowerCase().includes("replace-with")) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
 }
 
-app.use(cors());
-app.use(express.json());
+function requireSecret(name: string, minimumLength = 32): string {
+  const value = requireEnv(name);
+  const weakValues = new Set(["super-secret-key", "change-me", "changeme", "secret", "password"]);
+  const lower = value.toLowerCase();
+  if (value.length < minimumLength || weakValues.has(lower) || lower.includes("replace-with")) {
+    throw new Error(`${name} is missing or too weak. Use a random value of at least ${minimumLength} characters.`);
+  }
+  return value;
+}
+
+const SPREADSHEET_ID = requireEnv("SPREADSHEET_ID");
+const GOOGLE_DRIVE_FOLDER_ID = requireEnv("GOOGLE_DRIVE_FOLDER_ID");
+const GOOGLE_DRIVE_PO_FOLDER_ID = requireEnv("GOOGLE_DRIVE_PO_FOLDER_ID");
+const TEMPLATE_PR_ID = requireEnv("TEMPLATE_PR_ID");
+const TEMPLATE_PO_ID = requireEnv("TEMPLATE_PO_ID");
+const SESSION_SECRET = requireSecret("JWT_SECRET", 32);
+const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 8 * 60 * 60);
+const APP_BASE_URL = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
+
+if (!Number.isFinite(SESSION_TTL_SECONDS) || SESSION_TTL_SECONDS < 300) {
+  throw new Error("SESSION_TTL_SECONDS must be a number >= 300");
+}
+
+if (!fs.existsSync(PDF_DIR)) {
+  fs.mkdirSync(PDF_DIR, { recursive: true });
+}
+if (!fs.existsSync(PO_PDF_DIR)) {
+  fs.mkdirSync(PO_PDF_DIR, { recursive: true });
+}
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+const isAllowedLocalDevOrigin = (origin: string) => !isProduction && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+app.use(cors({
+  origin(origin, callback) {
+    // Allow non-browser/server-to-server calls with no Origin header.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || isAllowedLocalDevOrigin(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("Not allowed by CORS"));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Session-Token"],
+  exposedHeaders: ["X-Google-Token-Expired"],
+  maxAge: 86400,
+}));
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err?.message === "Not allowed by CORS") {
+    return res.status(403).json({ success: false, message: "Origin is not allowed by CORS." });
+  }
+  next(err);
+});
+app.use(express.json({ limit: "1mb" }));
+
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+function createRateLimiter(options: { windowMs: number; max: number; label: string }) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    const key = `${options.label}:${req.ip}:${req.method}:${req.path}`;
+    const current = hits.get(key);
+    if (!current || current.resetAt <= now) {
+      hits.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+    current.count += 1;
+    if (current.count > options.max) {
+      res.setHeader("Retry-After", String(Math.ceil((current.resetAt - now) / 1000)));
+      return res.status(429).json({ success: false, message: "Too many requests. Please try again later." });
+    }
+    next();
+  };
+}
+
+const apiRateLimiter = createRateLimiter({ windowMs: 60_000, max: 300, label: "api" });
+const loginRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5, label: "login" });
+app.use("/api", apiRateLimiter);
+app.use("/api/login", loginRateLimiter);
 
 // Prevent browser/client caching for API routes (critical for mobile browsers)
 app.use((req: any, res: any, next) => {
@@ -45,14 +139,13 @@ app.use((req: any, res: any, next) => {
   next();
 });
 
-const SPREADSHEET_ID = "1Ne5xeN2zEmScf9CVX5x9WguQZPM0Vk6dzQJ-n7xRfWU";
 
 // Helper untuk memformat private key agar kompatibel dengan Node.js crypto
 const getAuthClient = () => {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   let privateKey = process.env.GOOGLE_PRIVATE_KEY;
   
-  if (!email || !privateKey) {
+  if (!email || !privateKey || email.includes("your-service-account") || privateKey.includes("REPLACE_WITH")) {
      throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY");
   }
 
@@ -222,7 +315,7 @@ const getAuthFromRequest = (req: express.Request) => {
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
         if (token && token !== 'null' && token !== 'undefined' && token.length > 20) {
-            console.log(`[AUTH] Using User OAuth2 Token (${token.substring(0, 10)}...)`);
+            console.log("[AUTH] Using User OAuth2 Token");
             const oauth2Client = new google.auth.OAuth2() as any;
             oauth2Client.setCredentials({ access_token: token });
             oauth2Client.onAuthFallback = () => {
@@ -231,9 +324,197 @@ const getAuthFromRequest = (req: express.Request) => {
             return oauth2Client;
         }
     }
-    console.log(`[AUTH] Using Service Account (${process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL})`);
+    console.log("[AUTH] Using Service Account");
     return getAuthClient();
 };
+
+type SessionUser = {
+  username: string;
+  displayName: string;
+  division: string;
+  divisionCode: string;
+  wa: string;
+  role: string;
+  access: string;
+  iat: number;
+  exp: number;
+};
+
+const normalizeRole = (value: unknown) => String(value || "").trim().toUpperCase();
+const normalizeAccess = (value: unknown) => String(value || "").toUpperCase().split(",").map(v => v.trim().replace(/^[\"']|[\"']$/g, "")).filter(Boolean);
+const isAdminSession = (user?: SessionUser) => !!user && (normalizeRole(user.role).includes("ADMIN") || normalizeRole(user.divisionCode) === "ADMIN");
+const isApproverSession = (user?: SessionUser) => {
+  const role = normalizeRole(user?.role);
+  const divCode = normalizeRole(user?.divisionCode);
+  return role.includes("MANAGER") || role.includes("MANAJER") || role.includes("DIREKTUR") || role.includes("DIREKSI") ||
+    role.includes("MGR") || role.includes("DIR") || role.includes("KABAG") || role.includes("KADIV") || divCode === "MGR" || divCode === "DIR";
+};
+const isPurchaseSession = (user?: SessionUser) => {
+  const role = normalizeRole(user?.role);
+  const divCode = normalizeRole(user?.divisionCode);
+  return role.includes("PURCHASE") || role.includes("PURCHASING") || divCode === "PUR" || divCode === "PCH";
+};
+const hasSessionPermission = (user: SessionUser | undefined, permission: string) => {
+  const wanted = normalizeRole(permission);
+  if (!user) return false;
+  if (isAdminSession(user)) return true;
+  if (normalizeAccess(user.access).includes(wanted)) return true;
+  if (["DASHBOARD", "PR HISTORY", "PO HISTORY", "CREATE PR"].includes(wanted)) return true;
+  if (wanted === "APPROVAL") return isApproverSession(user);
+  if (wanted === "PURCHASE") return isPurchaseSession(user);
+  return false;
+};
+
+function signSessionPayload(payload: string) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+}
+
+function createSessionToken(user: Omit<SessionUser, "iat" | "exp">) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload: SessionUser & { v: number } = {
+    v: 1,
+    username: user.username,
+    displayName: user.displayName,
+    division: user.division,
+    divisionCode: user.divisionCode,
+    wa: user.wa,
+    role: user.role,
+    access: user.access,
+    iat: now,
+    exp: now + SESSION_TTL_SECONDS,
+  };
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `smp.${body}.${signSessionPayload(body)}`;
+}
+
+function timingSafeEqualString(a: string, b: string) {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function verifySessionToken(token: string): SessionUser | null {
+  try {
+    const [prefix, body, signature] = String(token || "").split(".");
+    if (prefix !== "smp" || !body || !signature) return null;
+    const expected = signSessionPayload(body);
+    if (!timingSafeEqualString(signature, expected)) return null;
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload.exp || payload.exp < now) return null;
+    return {
+      username: String(payload.username || ""),
+      displayName: String(payload.displayName || payload.username || ""),
+      division: String(payload.division || ""),
+      divisionCode: String(payload.divisionCode || ""),
+      wa: String(payload.wa || ""),
+      role: String(payload.role || "USER"),
+      access: String(payload.access || ""),
+      iat: Number(payload.iat || 0),
+      exp: Number(payload.exp || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getSessionToken(req: express.Request) {
+  const headerToken = req.header("X-Session-Token");
+  if (headerToken) return headerToken;
+  const authHeader = req.header("Authorization") || "";
+  if (authHeader.startsWith("Bearer smp.")) return authHeader.slice("Bearer ".length);
+  return "";
+}
+
+function requireSession(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.method === "OPTIONS") return next();
+  const session = verifySessionToken(getSessionToken(req));
+  if (!session) {
+    return res.status(401).json({ success: false, message: "Unauthorized. Please login again." });
+  }
+  (req as any).sessionUser = session;
+  next();
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const session = (req as any).sessionUser as SessionUser | undefined;
+  if (!isAdminSession(session)) {
+    return res.status(403).json({ success: false, message: "Forbidden. Admin role required." });
+  }
+  next();
+}
+
+function requireRoles(roles: string[]) {
+  const allowed = roles.map(normalizeRole);
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const session = (req as any).sessionUser as SessionUser | undefined;
+    const role = normalizeRole(session?.role);
+    if (isAdminSession(session) || allowed.includes(role)) return next();
+    if (allowed.some(r => ["MANAGER", "MANAJER", "MGR", "KABAG", "DIREKTUR", "DIREKSI", "DIR", "KADIV"].includes(r)) && isApproverSession(session)) return next();
+    if (allowed.some(r => ["PURCHASE", "PURCHASING"].includes(r)) && isPurchaseSession(session)) return next();
+    return res.status(403).json({ success: false, message: `Forbidden. Required role: ${roles.join("/")}` });
+  };
+}
+
+function requirePermission(permission: string) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const session = (req as any).sessionUser as SessionUser | undefined;
+    if (hasSessionPermission(session, permission)) return next();
+    return res.status(403).json({ success: false, message: `Forbidden. Missing permission: ${permission}` });
+  };
+}
+
+const PASSWORD_PREFIX = "pbkdf2_sha256";
+const PASSWORD_ITERATIONS = 210_000;
+
+function hashPassword(password: string) {
+  const salt = crypto.randomBytes(16).toString("base64url");
+  const hash = crypto.pbkdf2Sync(password, salt, PASSWORD_ITERATIONS, 32, "sha256").toString("base64url");
+  return `${PASSWORD_PREFIX}$${PASSWORD_ITERATIONS}$${salt}$${hash}`;
+}
+
+function isPasswordHash(value: string) {
+  return String(value || "").startsWith(`${PASSWORD_PREFIX}$`);
+}
+
+function verifyPassword(inputPassword: string, storedPassword: string) {
+  const stored = String(storedPassword || "");
+  if (isPasswordHash(stored)) {
+    const [, iterationsRaw, salt, expectedHash] = stored.split("$");
+    const iterations = Number(iterationsRaw);
+    if (!Number.isFinite(iterations) || !salt || !expectedHash) return false;
+    const actualHash = crypto.pbkdf2Sync(inputPassword, salt, iterations, 32, "sha256").toString("base64url");
+    return timingSafeEqualString(actualHash, expectedHash);
+  }
+  // Backward compatibility for legacy plaintext rows. Successful legacy logins are upgraded to a hash.
+  return timingSafeEqualString(inputPassword, stored);
+}
+
+function sanitizePublicUser(row: any[], index?: number) {
+  const displayName = row[2] || row[0] || "";
+  return {
+    id: typeof index === "number" ? index + 2 : undefined,
+    username: row[0] || "",
+    fullName: displayName,
+    displayName,
+    division: row[3] || "CS",
+    divCode: row[4] || "CS",
+    divisionCode: row[4] || "CS",
+    wa: row[5] || "",
+    role: row[6] || "USER",
+    access: row[7] || "",
+    hasPassword: Boolean(row[1]),
+  };
+}
+
+// Require a signed app session for every API except login and public PDF links.
+app.use("/api", (req, res, next) => {
+  if (req.path === "/login" || req.path.startsWith("/pdf/")) return next();
+  return requireSession(req, res, next);
+});
+
+app.use("/api/admin", requireAdmin);
+app.use(["/api/wa-diagnostics", "/api/wa-save-token", "/api/wa-test-send"], requireAdmin);
 
 // Modified helpers to accept auth
 async function createPrPdf(prId: string, data: any, auth: any) {
@@ -538,12 +819,6 @@ async function createPrPdf(prId: string, data: any, auth: any) {
   }
 }
 
-// IDs for Drive
-const GOOGLE_DRIVE_FOLDER_ID = "1GjYzgLWqoCt6FzihhD6q5xsv0MYYRb0c";
-const GOOGLE_DRIVE_PO_FOLDER_ID = "1N6GwnHBE-RZcsTI1cbzmsWG-_zslN0qE";
-const TEMPLATE_PR_ID = '1dNTmJEUxtXHyI044udxsKE6BBg1gnuJy55i2DzyuP9A';
-const TEMPLATE_PO_ID = '14vYhIYIofui-HEY7rTo7oWD_DpGVPCLfj5atDKEpRio';
-
 async function createPoPdf(poNo: string, data: any, auth: any) {
   const fileName = `${poNo.replace(/\//g, "_")}.pdf`;
   const filePath = path.join(PO_PDF_DIR, fileName);
@@ -793,20 +1068,8 @@ function getWaToken() {
     }
   }
 
-  let token = process.env.WA_API_TOKEN;
-  if (!token && fs.existsSync(".env.example")) {
-    try {
-      const exampleContent = fs.readFileSync(".env.example", "utf-8");
-      const match = exampleContent.match(/WA_API_TOKEN\s*=\s*(.+)/);
-      if (match && match[1]) {
-        token = match[1].trim();
-        process.env.WA_API_TOKEN = token;
-      }
-    } catch (e: any) {
-      console.warn("[WHATSAPP] Could not read .env.example", e.message);
-    }
-  }
-  return token || "";
+  // Never read secrets from .env.example. It is a public template only.
+  return process.env.WA_API_TOKEN?.trim() || "";
 }
 
 async function sendWhatsApp(
@@ -924,11 +1187,15 @@ async function sendWhatsApp(
 }
 
 function getAppUrl(req?: any) {
-  // Always use the Shared App URL so that any notification links, approval links, and spreadsheet link backups 
-  // correctly point to the Shared/Production version of the app. This avoids sending "ais-dev-*" links 
-  // (which are unauthorized and show "Page not found" to anyone except the original developer) 
-  // or insecure unencrypted "http://" links.
-  return "https://ais-pre-uwm77rhvr4ukp72jubhu7t-815065087537.asia-east1.run.app";
+  if (APP_BASE_URL) return APP_BASE_URL;
+
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
+  const proto = forwardedProto || req?.protocol || (isProduction ? "https" : "http");
+  const forwardedHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = forwardedHost || req?.headers?.host;
+
+  if (host) return `${proto}://${host}`;
+  return `http://localhost:${PORT}`;
 }
 
 async function notifyNewPR(prId: string, data: any, req?: any) {
@@ -1161,149 +1428,17 @@ Jika layar menampilkan pesan "blocking a required security cookie":
   }
 }
 
-async function syncPrDetailRow(prId: string, auth: any) {
-  const sheets = getSheets(auth);
-  
-  try {
-    console.log(`[SYNC] Starting sync for PR ${prId}...`);
-    // 1. Fetch all Rekap_PR rows to collect details
-    const prRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:S",
-    });
-    const prRows = prRes.data.values || [];
-    
-    const matchingPrRows = prRows.filter(row => row[0] && String(row[0]).trim() === String(prId).trim());
-    
-    // 2. Fetch all PR_Detail rows
-    const detailRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "PR_Detail!A:N",
-    });
-    const detailRows = detailRes.data.values || [];
-    
-    const detailRowIndex = detailRows.findIndex(row => row[1] && String(row[1]).trim() === String(prId).trim());
-    
-    if (matchingPrRows.length === 0) {
-      // If PR was deleted in Rekap_PR, delete it from PR_Detail if it exists
-      if (detailRowIndex !== -1) {
-        const sheetId = await getSheetId("PR_Detail", auth);
-        await sheets.spreadsheets.batchUpdate({
-          spreadsheetId: SPREADSHEET_ID,
-          requestBody: {
-            requests: [
-              {
-                deleteDimension: {
-                  range: {
-                    sheetId: sheetId,
-                    dimension: "ROWS",
-                    startIndex: detailRowIndex,
-                    endIndex: detailRowIndex + 1
-                  }
-                }
-              }
-            ]
-          }
-        });
-        console.log(`[SYNC] Deleted PR ${prId} from PR_Detail since it has 0 items in Rekap_PR`);
-      }
-      return;
-    }
-    
-    // 3. Compile summary data
-    const firstRow = matchingPrRows[0];
-    const date = firstRow[1] || "";
-    const requester = firstRow[2] || "";
-    const division = firstRow[3] || "";
-    const supplier = firstRow[4] || "";
-    const notes = firstRow[10] || "";
-    const status = firstRow[11] || "";
-    const mgrApp = firstRow[12] || "";
-    const dirApp = firstRow[13] || "";
-    const pdfLink = firstRow[14] || "";
-    const poNo = firstRow[15] || "";
-    
-    const jumlahItem = matchingPrRows.length;
-    const totalQty = matchingPrRows.reduce((sum, row) => sum + (Number(row[7]) || 0), 0);
-    
-    // 4. Update or Append
-    if (detailRowIndex !== -1) {
-      // Update existing row (retain its existing ID PR in column A)
-      const existingId = detailRows[detailRowIndex][0] || `PRD${String(detailRowIndex).padStart(7, '0')}`;
-      const updatedValues = [
-        existingId,
-        prId,
-        date,
-        requester,
-        division,
-        supplier,
-        String(jumlahItem),
-        String(totalQty),
-        notes,
-        status,
-        mgrApp,
-        dirApp,
-        pdfLink,
-        poNo
-      ];
-      
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `PR_Detail!A${detailRowIndex + 1}:N${detailRowIndex + 1}`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [updatedValues] }
-      });
-      console.log(`[SYNC] Updated PR ${prId} in PR_Detail at row ${detailRowIndex + 1}`);
-    } else {
-      // Determine next ID PR
-      let nextIdNum = 1;
-      if (detailRows.length > 1) {
-        // Look at all ID PRs to find the max ID
-        const ids = detailRows.slice(1).map(row => {
-          const match = String(row[0]).match(/^PRD(\d+)/);
-          return match ? parseInt(match[1]) : 0;
-        });
-        nextIdNum = Math.max(...ids) + 1;
-      }
-      const newId = `PRD${String(nextIdNum).padStart(7, '0')}`;
-      
-      const newRow = [
-        newId,
-        prId,
-        date,
-        requester,
-        division,
-        supplier,
-        String(jumlahItem),
-        String(totalQty),
-        notes,
-        status,
-        mgrApp,
-        dirApp,
-        pdfLink,
-        poNo
-      ];
-      
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SPREADSHEET_ID,
-        range: "PR_Detail!A:N",
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [newRow] }
-      });
-      console.log(`[SYNC] Appended new PR ${prId} to PR_Detail as ${newId}`);
-    }
-  } catch (err: any) {
-    console.error(`[SYNC] Error syncing PR ${prId} to PR_Detail: ${err.message}`);
-  }
-}
-
 // API: Login (Real-time from Spreadsheet)
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
   const inputUser = String(username || "").trim().toUpperCase();
-  const inputPass = String(password || "").trim();
+  const inputPass = String(password || "");
 
-  console.log(`[LOGIN] Mencoba login: ${inputUser}`);
+  if (!inputUser || !inputPass) {
+    return res.status(400).json({ success: false, message: "Username dan password wajib diisi." });
+  }
+
+  console.log(`[LOGIN] Attempt: ${inputUser}`);
   
   try {
     const auth = getAuthClient(); // Always use Service Account for login master list
@@ -1312,30 +1447,51 @@ app.post("/api/login", async (req, res) => {
       spreadsheetId: SPREADSHEET_ID,
       range: "User_Role!A2:H",
     });
-    const rows = response.data.values;
+    const rows = response.data.values || [];
 
     if (!rows || rows.length === 0) {
       return res.status(404).json({ success: false, message: "Data users tidak ditemukan di Spreadsheet." });
     }
 
-    const userRow = rows.find(row => {
+    let userRow: any[] | null = null;
+    let rowNumber = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const dbUser = String(row[0] || "").trim().toUpperCase();
-      const dbPass = String(row[1] || "").trim();
-      return dbUser === inputUser && dbPass === inputPass;
-    });
+      const dbPass = String(row[1] || "");
+      if (dbUser === inputUser && verifyPassword(inputPass, dbPass)) {
+        userRow = row;
+        rowNumber = i + 2;
+        break;
+      }
+    }
 
     if (userRow) {
+      // Opportunistic migration: legacy plaintext passwords are upgraded on successful login.
+      const storedPassword = String(userRow[1] || "");
+      if (storedPassword && !isPasswordHash(storedPassword) && rowNumber > 0) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `User_Role!B${rowNumber}`,
+          valueInputOption: "RAW",
+          requestBody: { values: [[hashPassword(inputPass)]] }
+        });
+      }
+
+      const publicUser = sanitizePublicUser(userRow);
       return res.json({
         success: true,
-        user: {
-          username: userRow[0] || "",
-          displayName: userRow[2] || userRow[0] || "", // Fallback to username if FULL_NAME is empty
-          division: userRow[3] || "CS",                // Default division
-          divisionCode: userRow[4] || "CS",            // Default division code
-          wa: userRow[5] || "",
-          role: userRow[6] || "USER",                  // Default role
-          access: userRow[7] || ""
-        }
+        user: publicUser,
+        sessionToken: createSessionToken({
+          username: String(publicUser.username || ""),
+          displayName: String(publicUser.fullName || publicUser.username || ""),
+          division: String(publicUser.division || "CS"),
+          divisionCode: String(publicUser.divisionCode || publicUser.divCode || "CS"),
+          wa: String(publicUser.wa || ""),
+          role: String(publicUser.role || "USER"),
+          access: String(publicUser.access || ""),
+        }),
+        expiresIn: SESSION_TTL_SECONDS,
       });
     }
 
@@ -1368,346 +1524,781 @@ app.get("/api/stock", async (req, res) => {
   }
 });
 
-// Cache for PRs and POs (in preview server - for presentation)
-let prList: any[] = [];
-let poList: any[] = [];
-let auditTrail: any[] = [];
+
+// --- Normalized Google Sheets API (Header/Detail schema) ---
+// Required tabs: User_Role, Master_Stock, PR_Header, PR_Detail, PO_Header, PO_Detail
+const NORMALIZED_SHEETS = {
+  PR_HEADER: "PR_Header",
+  PR_DETAIL: "PR_Detail",
+  PO_HEADER: "PO_Header",
+  PO_DETAIL: "PO_Detail",
+};
+
+const romanMonths = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+const safeText = (value: unknown) => String(value ?? "").trim();
+const cleanCode = (value: unknown, fallback = "GEN") => safeText(value).replace(/[^A-Za-z0-9_-]/g, "").toUpperCase() || fallback;
+const asNumber = (value: unknown) => Number(value || 0) || 0;
+
+async function sheetValues(auth: any, range: string) {
+  const sheets = getSheets(auth);
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range });
+  return response.data.values || [];
+}
+
+async function appendSheetValues(auth: any, range: string, values: any[][]) {
+  const sheets = getSheets(auth);
+  return sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values },
+  });
+}
+
+async function updateSheetValues(auth: any, range: string, values: any[][]) {
+  const sheets = getSheets(auth);
+  return sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values },
+  });
+}
+
+async function deleteSheetRows(auth: any, sheetName: string, rowNumbers: number[]) {
+  const uniqueRows = Array.from(new Set(rowNumbers)).filter(n => Number.isFinite(n) && n > 1).sort((a, b) => b - a);
+  if (uniqueRows.length === 0) return;
+  const sheetId = await getSheetId(sheetName, auth);
+  const sheets = getSheets(auth);
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: uniqueRows.map(rowNumber => ({
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: "ROWS",
+            startIndex: rowNumber - 1,
+            endIndex: rowNumber,
+          },
+        },
+      })),
+    },
+  });
+}
+
+type PrHeaderRow = {
+  rowIndex: number;
+  prId: string;
+  date: string;
+  requester: string;
+  division: string;
+  supplier: string;
+  notes: string;
+  status: string;
+  mgrApproval: string;
+  dirApproval: string;
+  pdfLink: string;
+  poNo: string;
+};
+
+type PrDetailRow = {
+  rowIndex: number;
+  detailId: string;
+  prId: string;
+  itemName: string;
+  unit: string;
+  qty: any;
+  stockOnhand: any;
+  avgSales: any;
+  b1: any;
+  b2: any;
+  b3: any;
+};
+
+type PoHeaderRow = {
+  rowIndex: number;
+  poNo: string;
+  prId: string;
+  purchaseName: string;
+  date: string;
+  deliveryDate: string;
+  supplier: string;
+  notes: string;
+  pdfLink: string;
+  status: string;
+  division: string;
+  discount: any;
+  tax: any;
+  others: any;
+  grandTotal: any;
+  discountPercent: any;
+  taxPercent: any;
+  subTotal: any;
+};
+
+type PoDetailRow = {
+  rowIndex: number;
+  detailId: string;
+  poNo: string;
+  prId?: string;
+  itemName: string;
+  unit: string;
+  qty: any;
+  price: any;
+  total: any;
+};
+
+function mapPrHeader(row: any[], index: number): PrHeaderRow {
+  return {
+    rowIndex: index + 2,
+    prId: safeText(row[0]),
+    date: safeText(row[1]),
+    requester: safeText(row[2]),
+    division: safeText(row[3]),
+    supplier: safeText(row[4]),
+    notes: safeText(row[5]),
+    status: safeText(row[6]),
+    mgrApproval: safeText(row[7]),
+    dirApproval: safeText(row[8]),
+    pdfLink: safeText(row[9]),
+    poNo: safeText(row[10]),
+  };
+}
+
+function mapPrDetail(row: any[], index: number): PrDetailRow {
+  return {
+    rowIndex: index + 2,
+    detailId: safeText(row[0]),
+    prId: safeText(row[1]),
+    itemName: safeText(row[2]),
+    unit: safeText(row[3]),
+    qty: row[4] ?? "",
+    stockOnhand: row[5] ?? "",
+    avgSales: row[6] ?? "",
+    b1: row[7] ?? "",
+    b2: row[8] ?? "",
+    b3: row[9] ?? "",
+  };
+}
+
+function mapPoHeader(row: any[], index: number): PoHeaderRow {
+  return {
+    rowIndex: index + 2,
+    poNo: safeText(row[0]),
+    prId: safeText(row[1]),
+    purchaseName: safeText(row[2]),
+    date: safeText(row[3]),
+    deliveryDate: safeText(row[4]),
+    supplier: safeText(row[5]),
+    division: safeText(row[6]),
+    notes: safeText(row[7]),
+    pdfLink: safeText(row[8]),
+    status: safeText(row[9]),
+    subTotal: row[10] ?? "",
+    discount: row[11] ?? "",
+    discountPercent: row[12] ?? "",
+    tax: row[13] ?? "",
+    taxPercent: row[14] ?? "",
+    others: row[15] ?? "",
+    grandTotal: row[16] ?? "",
+  };
+}
+
+function mapPoDetail(row: any[], index: number): PoDetailRow {
+  return {
+    rowIndex: index + 2,
+    detailId: safeText(row[0]),
+    poNo: safeText(row[1]),
+    itemName: safeText(row[2]),
+    unit: safeText(row[3]),
+    qty: row[4] ?? "",
+    price: row[5] ?? "",
+    total: row[6] ?? "",
+  };
+}
+
+async function loadPrHeaderDetail(auth: any) {
+  const [headerRows, detailRows] = await Promise.all([
+    sheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A2:K`),
+    sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A2:J`),
+  ]);
+  const headers = headerRows.map(mapPrHeader).filter((h: PrHeaderRow) => h.prId);
+  const details = detailRows.map(mapPrDetail).filter((d: PrDetailRow) => d.prId);
+  const headerById = new Map(headers.map((h: PrHeaderRow) => [h.prId, h]));
+  return { headers, details, headerById };
+}
+
+async function loadPoHeaderDetail(auth: any) {
+  const [headerRows, detailRows] = await Promise.all([
+    sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:Q`),
+    sheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!A2:G`),
+  ]);
+  const headers = headerRows.map(mapPoHeader).filter((h: PoHeaderRow) => h.poNo);
+  const details = detailRows.map(mapPoDetail).filter((d: PoDetailRow) => d.poNo);
+  const headerByPoNo = new Map(headers.map((h: PoHeaderRow) => [h.poNo, h]));
+  return { headers, details, headerByPoNo };
+}
+
+function toPrApiRow(detail: PrDetailRow, header: PrHeaderRow) {
+  return {
+    rowIndex: detail.rowIndex,
+    detailRowIndex: detail.rowIndex,
+    headerRowIndex: header.rowIndex,
+    detailId: detail.detailId,
+    id: header.prId,
+    date: header.date,
+    requester: header.requester,
+    division: header.division,
+    supplier: header.supplier,
+    itemName: detail.itemName,
+    unit: detail.unit,
+    qty: detail.qty,
+    stockOnhand: detail.stockOnhand,
+    avgSales: detail.avgSales,
+    notes: header.notes,
+    status: header.status,
+    mgrApp: header.mgrApproval,
+    dirApp: header.dirApproval,
+    pdfLink: header.pdfLink || `/api/pdf/pr/${header.prId.replace(/\//g, "_")}.pdf`,
+    poNumber: header.poNo,
+    b1: detail.b1,
+    b2: detail.b2,
+    b3: detail.b3,
+  };
+}
+
+function toPoApiRow(detail: PoDetailRow, header: PoHeaderRow) {
+  return {
+    rowIndex: detail.rowIndex,
+    detailRowIndex: detail.rowIndex,
+    headerRowIndex: header.rowIndex,
+    detailId: detail.detailId,
+    prId: header.prId || detail.prId,
+    purchaseName: header.purchaseName,
+    poNo: header.poNo,
+    date: header.date,
+    deliveryDate: header.deliveryDate,
+    supplier: header.supplier,
+    itemName: detail.itemName,
+    unit: detail.unit,
+    qty: detail.qty,
+    price: detail.price,
+    total: detail.total,
+    notes: header.notes,
+    pdfLink: header.pdfLink || `/api/pdf/po/${header.poNo.replace(/\//g, "_")}.pdf`,
+    status: header.status,
+    division: header.division,
+    discount: header.discount,
+    tax: header.tax,
+    others: header.others,
+    grandTotal: header.grandTotal,
+    discountPercent: header.discountPercent,
+    taxPercent: header.taxPercent,
+  };
+}
+
+async function nextPrefixedNumber(auth: any, sheetName: string, rangeColumn: string, prefix: string) {
+  const rows = await sheetValues(auth, `${sheetName}!${rangeColumn}:${rangeColumn}`);
+  const nums = rows.slice(1).map((row: any[]) => {
+    const match = safeText(row[0]).match(new RegExp(`^${prefix}(\\d+)`));
+    return match ? parseInt(match[1], 10) : 0;
+  });
+  return Math.max(...nums, 0) + 1;
+}
+
+async function nextPrNumber(auth: any, yearSuffix: string) {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A:A`);
+  const nums = rows.slice(1).map((row: any[]) => {
+    const match = safeText(row[0]).match(/^PB-(\d+)-(\d{2})$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      const yr = match[2];
+      if (yr === yearSuffix) return num;
+    }
+    return 0;
+  });
+  return Math.max(...nums, 0) + 1;
+}
+
+async function nextPoNumber(auth: any, yearSuffix: string) {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A:A`);
+  const nums = rows.slice(1).map((row: any[]) => {
+    const match = safeText(row[0]).match(/^BL-(\d+)-(\d{2})$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      const yr = match[2];
+      if (yr === yearSuffix) return num;
+    }
+    return 0;
+  });
+  return Math.max(...nums, 0) + 1;
+}
+
+async function findPrHeader(auth: any, prId: string) {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A2:K`);
+  for (let i = 0; i < rows.length; i++) {
+    const header = mapPrHeader(rows[i], i);
+    if (header.prId === prId) return header;
+  }
+  return null;
+}
+
+async function findPoHeader(auth: any, poNo: string) {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:Q`);
+  for (let i = 0; i < rows.length; i++) {
+    const header = mapPoHeader(rows[i], i);
+    if (header.poNo === poNo) return header;
+  }
+  return null;
+}
+
+async function updatePrHeaderPdfLink(auth: any, prId: string, link: string) {
+  const header = await findPrHeader(auth, prId);
+  if (header) await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!J${header.rowIndex}`, [[link]]);
+}
+
+async function updatePoHeaderPdfLink(auth: any, poNo: string, link: string) {
+  const header = await findPoHeader(auth, poNo);
+  if (header) await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!I${header.rowIndex}`, [[link]]);
+}
+
+async function updatePrHeaderStatus(auth: any, prId: string, status: string, poNo?: string) {
+  const header = await findPrHeader(auth, prId);
+  if (!header) return;
+  await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!G${header.rowIndex}`, [[status]]);
+  if (typeof poNo === "string") {
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!K${header.rowIndex}`, [[poNo]]);
+  }
+}
 
 app.get("/api/stats", async (req, res) => {
   try {
     const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    
-    // Fetch Rekap_PR
-    const prRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A2:S", // Adjust range if needed
-    });
-    const prRows = prRes.data.values || [];
+    const { headers, details, headerById } = await loadPrHeaderDetail(auth);
 
-    // Fetch Rekap_PO
-    const poRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PO!A2:O", // Updated range to include O (Division)
-    });
-    const poRows = poRes.data.values || [];
-
-    // Unique PRs
-    const uniquePrs = [...new Set(prRows.map(row => row[0]))];
-    
-    // Group rows by PR ID to check status for each PR
-    const prGroups = {};
-    prRows.forEach(row => {
-      const id = row[0];
-      if (!prGroups[id]) prGroups[id] = [];
-      prGroups[id].push(row);
-    });
-
-    const getUniqueCountByStatus = (statuses) => {
-        const upperStatuses = statuses.map(s => String(s || "").trim().toUpperCase());
-        return Object.values(prGroups).filter((rows: any) => {
-            const rowStatus = String(rows[0][11] || "").trim().toUpperCase();
-            return upperStatuses.includes(rowStatus);
-        }).length;
+    const statusCount = (statuses: string[]) => {
+      const wanted = statuses.map(s => s.toUpperCase());
+      return headers.filter(h => wanted.includes(safeText(h.status).toUpperCase())).length;
     };
 
-    // Count unique PO numbers for "WAITING RECEIVE"
-    const uniquePosWaitingReceive = new Set(
-      prRows
-        .filter(row => String(row[11] || "").trim().toUpperCase() === "WAITING RECEIVE")
-        .map(row => row[15]) // Column P is index 15
-        .filter(Boolean)
-    ).size;
-
-    // Calculate real chart data based on months
+    const waitingReceive = headers.filter(h => safeText(h.status).toUpperCase() === "WAITING RECEIVE" && h.poNo).length;
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const currentYear = new Date().getFullYear();
-    const monthlyData = {};
-    monthNames.forEach(m => monthlyData[m] = { prCount: 0, totalQty: 0 });
+    const monthlyData: Record<string, { prIds: Set<string>; totalQty: number }> = {};
+    monthNames.forEach(m => monthlyData[m] = { prIds: new Set(), totalQty: 0 });
 
-    prRows.forEach(row => {
-        const dateStr = row[1]; // Column B
-        if (!dateStr) return;
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) return;
-        
-        // We only care about current or recent months
-        const month = monthNames[date.getMonth()];
-        const qty = Number(row[7]) || 0; // Column H (QTY)
-        
-        if (monthlyData[month]) {
-            // Count unique PRs per month for volume
-            // But usually charts show total transactions or total items
-            // Let's count items for PR Count and sum QTY
-            monthlyData[month].prCount += 1;
-            monthlyData[month].totalQty += qty;
-        }
+    details.forEach(d => {
+      const h = headerById.get(d.prId);
+      if (!h?.date) return;
+      const date = new Date(h.date);
+      if (isNaN(date.getTime())) return;
+      const month = monthNames[date.getMonth()];
+      monthlyData[month].prIds.add(h.prId);
+      monthlyData[month].totalQty += asNumber(d.qty);
     });
 
-    // Get last 5-6 months
-    const lastSixMonths = [];
+    const lastSixMonths: string[] = [];
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        lastSixMonths.push(monthNames[d.getMonth()]);
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      lastSixMonths.push(monthNames[d.getMonth()]);
     }
 
-    const prCounts = lastSixMonths.map(m => monthlyData[m].prCount);
-    const totalQtys = lastSixMonths.map(m => monthlyData[m].totalQty);
-
-    const stats = {
-      totalPR: uniquePrs.length,
-      waitingManager: getUniqueCountByStatus(["WAITING MANAGER APPROVAL"]),
-      waitingDirector: getUniqueCountByStatus(["WAITING DIREKTUR APPROVAL"]),
-      waitingPO: getUniqueCountByStatus(["WAITING CREATED PO"]),
-      waitingReceive: uniquePosWaitingReceive,
-      finish: getUniqueCountByStatus(["FINISH"]),
-      chartData: {
-        labels: lastSixMonths,
-        datasets: [
-          { 
-            type: 'line' as const,
-            label: "PR Count", 
-            data: prCounts, 
-            borderColor: "rgb(236, 72, 153)", // Pink-500
-            backgroundColor: "rgba(236, 72, 153, 0.1)",
-            fill: true,
-            tension: 0.4,
-            yAxisID: 'y',
-          },
-          {
-            type: 'bar' as const,
-            label: "Total Qty",
-            data: totalQtys,
-            backgroundColor: "rgba(79, 70, 229, 0.6)", // Indigo-500
-            borderColor: "rgb(79, 70, 229)",
-            borderRadius: 8,
-            borderWidth: 1,
-            yAxisID: 'y1',
-          }
-        ]
-      },
-      topSuppliers: [],
-      topDivisions: [],
-      topItems: []
-    };
-
-    // Helper calculate counts with unique PR numbers and total quantities
-    const getTop = (rows, index, limit = 5) => {
-      const counts = {}; // key -> { prIds: Set, totalQty: number }
-      rows.forEach(row => {
-        const val = row[index];
-        const prId = row[0]; // nomor pr is Column A (index 0)
-        const qty = Number(row[7]) || 0; // Column H (QTY REQUEST)
-        if (val) {
-          if (!counts[val]) {
-            counts[val] = { prIds: new Set(), totalQty: 0 };
-          }
-          if (prId) {
-            counts[val].prIds.add(String(prId).trim());
-          }
-          counts[val].totalQty += qty;
-        }
+    const getTop = (kind: "supplier" | "division" | "item", limit = 5) => {
+      const counts: Record<string, { prIds: Set<string>; totalQty: number }> = {};
+      details.forEach(d => {
+        const h = headerById.get(d.prId);
+        const key = kind === "item" ? d.itemName : kind === "supplier" ? h?.supplier : h?.division;
+        if (!key) return;
+        if (!counts[key]) counts[key] = { prIds: new Set(), totalQty: 0 };
+        if (d.prId) counts[key].prIds.add(d.prId);
+        counts[key].totalQty += asNumber(d.qty);
       });
       return Object.entries(counts)
-        .map(([name, data]: [string, any]) => ({ 
-          name, 
-          count: data.prIds.size, 
-          totalQty: data.totalQty 
-        }))
-        .sort((a: any, b: any) => b.count - a.count)
+        .map(([name, data]) => ({ name, count: data.prIds.size, totalQty: data.totalQty }))
+        .sort((a, b) => b.count - a.count)
         .slice(0, limit);
     };
 
-    stats.topSuppliers = getTop(prRows, 4); // Column E (Supplier)
-    stats.topDivisions = getTop(prRows, 3);  // Column D (Divisi)
-    stats.topItems = getTop(prRows, 5, 10); // Column F (Item Name) - Top 10
-
-    res.json(stats);
-  } catch (error) {
-    handleApiError(res, error, "STATS");
-  }
-});
-
-app.post(["/api/pr", "/api/pr/create"], async (req, res) => {
-  try {
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    
-    // 1. Get current PRs to determine the next sequential number
-    const prData = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:A",
+    res.json({
+      totalPR: headers.length,
+      waitingManager: statusCount(["WAITING MANAGER APPROVAL"]),
+      waitingDirector: statusCount(["WAITING DIREKTUR APPROVAL"]),
+      waitingPO: statusCount(["WAITING CREATED PO"]),
+      waitingReceive,
+      finish: statusCount(["FINISH"]),
+      chartData: {
+        labels: lastSixMonths,
+        datasets: [
+          {
+            type: "line" as const,
+            label: "PR Count",
+            data: lastSixMonths.map(m => monthlyData[m].prIds.size),
+            borderColor: "rgb(236, 72, 153)",
+            backgroundColor: "rgba(236, 72, 153, 0.1)",
+            fill: true,
+            tension: 0.4,
+            yAxisID: "y",
+          },
+          {
+            type: "bar" as const,
+            label: "Total Qty",
+            data: lastSixMonths.map(m => monthlyData[m].totalQty),
+            backgroundColor: "rgba(79, 70, 229, 0.6)",
+            borderColor: "rgb(79, 70, 229)",
+            borderRadius: 8,
+            borderWidth: 1,
+            yAxisID: "y1",
+          },
+        ],
+      },
+      topSuppliers: getTop("supplier"),
+      topDivisions: getTop("division"),
+      topItems: getTop("item", 10),
     });
-    const prRows = prData.data.values || [];
-    let nextNum = 1;
-    if (prRows.length > 1) { // Skip header
-      // Collect all PR numbers to find the max
-      const nums = prRows.slice(1).map(row => {
-        const match = String(row[0]).match(/^PR(\d+)/);
-        return match ? parseInt(match[1]) : 0;
-      });
-      nextNum = Math.max(...nums) + 1;
-    }
-    
-    const prId = `PR${String(nextNum).padStart(4, '0')}/${req.body.divCode}/V/2026`;
-    const date = new Date().toISOString().split('T')[0];
-    const pdfUrl = `/api/pdf/pr/${prId.replace(/\//g, '_')}.pdf`;
-    
-    const rowsToAppend = req.body.items.map(item => [
-      prId, 
-      date, 
-      req.body.requester, 
-      req.body.division,  // Column D (index 3)
-      req.body.supplier,  // Column E (index 4)
-      item.itemName,      // Column F (index 5)
-      item.unit,          // Column G (index 6)
-      item.qty,           // Column H (index 7)
-      item.stockOnhand,   // Column I (index 8)
-      item.avgSales,      // Column J (index 9)
-      req.body.notes || "", // Column K (index 10) - Overall Notes
-      "WAITING MANAGER APPROVAL",   // Status - Column L (index 11)
-      "",                 // Column M (index 12) - MGR APPROVAL
-      "",                 // Column N (index 13) - DIREKTUR APPROVAL
-      pdfUrl,             // Column O (index 14) - LINK_PDF
-      "",                 // PO Number - Column P (index 15)
-      item.b1,            // Column Q (index 16)
-      item.b2,            // Column R (index 17)
-      item.b3,            // Column S (index 18)
-    ]);
-
-    // Append to Rekap_PR
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:Q",
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: rowsToAppend
-      }
-    });
-
-    // Synchronize to PR_Detail summary sheet
-    await syncPrDetailRow(prId, auth);
-    
-    // Create real PDF
-    await createPrPdf(prId, {
-      date,
-      requester: req.body.requester,
-      division: req.body.division,
-      supplier: req.body.supplier,
-      notes: req.body.notes || "",
-      items: req.body.items.map(item => ({
-        ...item,
-        avgSales: (Number(item.b1||0)+Number(item.b2||0)+Number(item.b3||0))/3
-      }))
-    }, auth);
-
-    // Upload to Google Drive as background / backup process
-    const fileName = `${prId.replace(/\//g, "_")}.pdf`;
-    const filePath = path.join(PDF_DIR, fileName);
-    console.log(`[PR] Attempting backup Drive upload for ${fileName}`);
-    uploadToDrive(filePath, fileName, auth).then(async (driveLink) => {
-        console.log(`[PR] Drive Backup upload result for ${prId}: ${driveLink || 'FAILED'}`);
-        if (driveLink) {
-            try {
-                const currentData = await sheets.spreadsheets.values.get({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: "Rekap_PR!A:A"
-                });
-                const rows = currentData.data.values || [];
-                for (let i = 0; i < rows.length; i++) {
-                    if (rows[i][0] === prId) {
-                        await sheets.spreadsheets.values.update({
-                            spreadsheetId: SPREADSHEET_ID,
-                            range: `Rekap_PR!O${i + 1}`,
-                            valueInputOption: "USER_ENTERED",
-                            requestBody: { values: [[driveLink]] }
-                        });
-                        console.log(`[PR] Updated link for ${prId} on row ${i + 1} with Drive link: ${driveLink}`);
-                    }
-                }
-                // Sync to PR_Detail after updating PDF link
-                await syncPrDetailRow(prId, auth);
-            } catch (sheetErr: any) {
-                console.error(`[PR] Failed to update Sheets with Google Drive link:`, sheetErr.message);
-            }
-        } else {
-            const absolutePdfUrl = `${getAppUrl(req)}/api/pdf/pr/${prId.replace(/\//g, '_')}.pdf`;
-            try {
-                const currentData = await sheets.spreadsheets.values.get({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: "Rekap_PR!A:A"
-                });
-                const rows = currentData.data.values || [];
-                for (let i = 0; i < rows.length; i++) {
-                    if (rows[i][0] === prId) {
-                        await sheets.spreadsheets.values.update({
-                            spreadsheetId: SPREADSHEET_ID,
-                            range: `Rekap_PR!O${i + 1}`,
-                            valueInputOption: "USER_ENTERED",
-                            requestBody: { values: [[absolutePdfUrl]] }
-                        });
-                        console.log(`[PR] Updated link for ${prId} on row ${i + 1} with local absolute fallback URL`);
-                    }
-                }
-                // Sync to PR_Detail after updating PDF link
-                await syncPrDetailRow(prId, auth);
-            } catch (sheetErr: any) {
-                console.error(`[PR] Failed to update Sheets with fallback absolute link:`, sheetErr.message);
-            }
-        }
-    }).catch(err => {
-        console.warn(`[PR] Drive Backup upload failed: ${err.message}`);
-    });
-
-    // Send WhatsApp notifications to Manager/Director in background
-    notifyNewPR(prId, req.body, req).catch(err => {
-      console.error("[WHATSAPP] New PR notification failed:", err.message);
-    });
-
-    res.json({ success: true, pr: { id: prId, pdfLink: pdfUrl } });
   } catch (error: any) {
-    handleApiError(res, error, "PR_CREATE");
+    handleApiError(res, error, "STATS_NORMALIZED");
   }
 });
 
 app.get("/api/pr", async (req, res) => {
   try {
     const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A2:S",
-    });
-    const rows = response.data.values || [];
-    const prs = rows.map((row, i) => ({
-      rowIndex: i + 2,
-      id: row[0],
-      date: row[1],
-      requester: row[2],
-      division: row[3],
-      supplier: row[4],
-      itemName: row[5],
-      unit: row[6],
-      qty: row[7],
-      stockOnhand: row[8],
-      avgSales: row[9],
-      notes: row[10],
-      status: row[11],
-      mgrApp: row[12],
-      dirApp: row[13],
-      pdfLink: row[14] ? String(row[14]).trim() : `/api/pdf/pr/${String(row[0] || "").trim().replace(/\//g, '_')}.pdf`,
-      poNumber: row[15],
-      b1: row[16],
-      b2: row[17],
-      b3: row[18],
-    }));
-    res.json(prs.reverse()); // Newest first
-  } catch (error) {
-    handleApiError(res, error, "PR_LIST");
+    const { details, headerById } = await loadPrHeaderDetail(auth);
+    const rows = details
+      .map(d => {
+        const header = headerById.get(d.prId);
+        return header ? toPrApiRow(d, header) : null;
+      })
+      .filter(Boolean);
+    res.json(rows.reverse());
+  } catch (error: any) {
+    handleApiError(res, error, "PR_LIST_NORMALIZED");
   }
 });
 
+app.post(["/api/pr", "/api/pr/create"], requirePermission("CREATE PR"), async (req, res) => {
+  try {
+    const sessionUser = (req as any).sessionUser as SessionUser;
+    const requester = sessionUser.displayName || sessionUser.username;
+    const division = sessionUser.division || req.body.division || "";
+    const divCode = cleanCode(sessionUser.divisionCode || req.body.divCode || "GEN");
+    const auth = getAuthFromRequest(req);
+    const now = new Date();
+    const date = now.toISOString().split("T")[0];
+    const yearSuffix = String(now.getFullYear()).slice(-2);
+    const nextNum = await nextPrNumber(auth, yearSuffix);
+    const prId = `PB-${String(nextNum).padStart(10, "0")}-${yearSuffix}`;
+    const pdfUrl = `/api/pdf/pr/${prId.replace(/\//g, "_")}.pdf`;
+    const items = Array.isArray(req.body.items) ? req.body.items : [];
+
+    const firstDetailNum = await nextPrefixedNumber(auth, NORMALIZED_SHEETS.PR_DETAIL, "A", "PRD");
+    const detailRows = items.map((item: any, index: number) => {
+      const b1 = item.b1 ?? "0";
+      const b2 = item.b2 ?? "0";
+      const b3 = item.b3 ?? "0";
+      const avgSales = item.avgSales ?? ((asNumber(b1) + asNumber(b2) + asNumber(b3)) / 3);
+      return [
+        `PRD${String(firstDetailNum + index).padStart(7, "0")}`,
+        prId,
+        item.itemName,
+        item.unit,
+        item.qty,
+        item.stockOnhand,
+        avgSales,
+        b1,
+        b2,
+        b3,
+      ];
+    });
+
+    await appendSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A:K`, [[
+      prId,
+      date,
+      requester,
+      division,
+      req.body.supplier,
+      req.body.notes || "",
+      "WAITING MANAGER APPROVAL",
+      "",
+      "",
+      pdfUrl,
+      "",
+    ]]);
+
+    if (detailRows.length) {
+      await appendSheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A:J`, detailRows);
+    }
+
+    await createPrPdf(prId, {
+      date,
+      requester,
+      division,
+      supplier: req.body.supplier,
+      notes: req.body.notes || "",
+      items: items.map((item: any) => ({
+        ...item,
+        avgSales: item.avgSales ?? ((asNumber(item.b1) + asNumber(item.b2) + asNumber(item.b3)) / 3),
+      })),
+    }, auth);
+
+    const fileName = `${prId.replace(/\//g, "_")}.pdf`;
+    const filePath = path.join(PDF_DIR, fileName);
+    uploadToDrive(filePath, fileName, auth).then(async (driveLink) => {
+      const finalLink = driveLink || `${getAppUrl(req)}/api/pdf/pr/${prId.replace(/\//g, "_")}.pdf`;
+      await updatePrHeaderPdfLink(auth, prId, finalLink);
+    }).catch(err => console.warn(`[PR] Drive Backup upload failed: ${err.message}`));
+
+    notifyNewPR(prId, { ...req.body, requester, division, divCode, items }, req).catch(err => {
+      console.error("[WHATSAPP] New PR notification failed:", err.message);
+    });
+
+    res.json({ success: true, pr: { id: prId, pdfLink: pdfUrl } });
+  } catch (error: any) {
+    handleApiError(res, error, "PR_CREATE_NORMALIZED");
+  }
+});
+
+app.post("/api/pr/approve", requireRoles(["MANAGER", "MANAJER", "MGR", "KABAG", "DIREKTUR", "DIREKSI", "DIR", "KADIV", "ADMIN"]), async (req, res) => {
+  try {
+    const { prId, action, reason } = req.body;
+    const sessionUser = (req as any).sessionUser as SessionUser;
+    const role = sessionUser.role;
+    const user = sessionUser.displayName || sessionUser.username;
+    const auth = getAuthFromRequest(req);
+    const { headers, details } = await loadPrHeaderDetail(auth);
+    const header = headers.find(h => h.prId === safeText(prId));
+    if (!header) return res.status(404).json({ success: false, message: "PR not found" });
+
+    const roleUp = safeText(role).toUpperCase();
+    const statusUp = safeText(header.status).toUpperCase();
+    let newStatus = "";
+    if (action === "REJECT") newStatus = "Rejected";
+    else if (action === "PENDING") {
+      newStatus = roleUp === "MANAGER" || roleUp === "MGR" ? "WAITING MANAGER APPROVAL" : "WAITING DIREKTUR APPROVAL";
+    } else if (roleUp === "MANAGER" || roleUp === "MGR") {
+      newStatus = "WAITING DIREKTUR APPROVAL";
+    } else if (roleUp === "DIREKTUR" || roleUp === "DIR") {
+      newStatus = "WAITING CREATED PO";
+    } else if (roleUp === "ADMIN") {
+      newStatus = statusUp === "WAITING MANAGER APPROVAL" ? "WAITING DIREKTUR APPROVAL" : "WAITING CREATED PO";
+    }
+
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!G${header.rowIndex}`, [[newStatus]]);
+
+    if (action === "APPROVE") {
+      let approverCol = "";
+      if (roleUp === "MANAGER" || roleUp === "MGR" || (roleUp === "ADMIN" && statusUp === "WAITING MANAGER APPROVAL")) approverCol = "H";
+      if (roleUp === "DIREKTUR" || roleUp === "DIR" || (roleUp === "ADMIN" && statusUp === "WAITING DIREKTUR APPROVAL")) approverCol = "I";
+      if (approverCol) await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!${approverCol}${header.rowIndex}`, [[`${user} (APPROVE)`]]);
+    }
+
+    if (action === "REJECT" && reason) {
+      await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!F${header.rowIndex}`, [[`${header.notes || ""} | REJECTED: ${reason}`]]);
+    }
+
+    const matchingDetails = details.filter(d => d.prId === prId);
+    if (newStatus === "WAITING DIREKTUR APPROVAL") {
+      notifyDirekturPR(prId, {
+        requester: header.requester,
+        division: header.division,
+        supplier: header.supplier,
+        notes: header.notes,
+        items: matchingDetails.map(d => ({ itemName: d.itemName, qty: d.qty })),
+      }, user, req).catch(err => console.error("[WHATSAPP] Direktur approval notification failed:", err.message));
+    }
+
+    notifyPRApprovalChange(prId, user, role, newStatus, action === "REJECT", reason, header.requester, req)
+      .catch(err => console.error("[WHATSAPP] Approval notification failed:", err.message));
+
+    res.json({ success: true });
+  } catch (error: any) {
+    handleApiError(res, error, "APPROVE_NORMALIZED");
+  }
+});
+
+app.get("/api/po", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const { details, headerByPoNo } = await loadPoHeaderDetail(auth);
+    const rows = details
+      .map(d => {
+        const header = headerByPoNo.get(d.poNo);
+        return header ? toPoApiRow(d, header) : null;
+      })
+      .filter(Boolean);
+    res.json(rows.reverse());
+  } catch (error: any) {
+    handleApiError(res, error, "PO_LIST_NORMALIZED");
+  }
+});
+
+app.post(["/api/po", "/api/po/create"], requireRoles(["PURCHASE", "PURCHASING", "ADMIN"]), async (req, res) => {
+  try {
+    const { prId, supplier, deliveryDate, items, notes, discount, tax, others, subTotal, grandTotal, discountPercent, taxPercent, division } = req.body;
+    const sessionUser = (req as any).sessionUser as SessionUser;
+    const purchaseName = sessionUser.displayName || sessionUser.username;
+    const auth = getAuthFromRequest(req);
+    const now = new Date();
+    const yearSuffix = String(now.getFullYear()).slice(-2);
+    const nextNum = await nextPoNumber(auth, yearSuffix);
+    const poNo = `BL-${String(nextNum).padStart(9, "0")}-${yearSuffix}`;
+    const date = now.toISOString().split("T")[0];
+    const poPdfUrl = `/api/pdf/po/${poNo.replace(/\//g, "_")}.pdf`;
+    const safeItems = Array.isArray(items) ? items : [];
+
+    await createPoPdf(poNo, {
+      prId,
+      purchaseName,
+      supplier,
+      deliveryDate,
+      items: safeItems,
+      notes,
+      discount,
+      tax,
+      others,
+      subTotal,
+      grandTotal,
+      discountPercent,
+      taxPercent,
+      division,
+    }, auth);
+
+    await appendSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A:Q`, [[
+      poNo,
+      prId,
+      purchaseName,
+      date,
+      deliveryDate,
+      supplier,
+      division,
+      notes || "",
+      poPdfUrl,
+      "WAITING RECEIVE",
+      subTotal,
+      discount,
+      discountPercent,
+      tax,
+      taxPercent,
+      others,
+      grandTotal,
+    ]]);
+
+    const firstDetailNum = await nextPrefixedNumber(auth, NORMALIZED_SHEETS.PO_DETAIL, "A", "POD");
+    const detailRows = safeItems.map((item: any, index: number) => [
+      `POD${String(firstDetailNum + index).padStart(7, "0")}`,
+      poNo,
+      item.itemName,
+      item.unit,
+      item.qty,
+      item.price,
+      asNumber(item.price) * asNumber(item.qty),
+    ]);
+    if (detailRows.length) await appendSheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!A:G`, detailRows);
+
+    await updatePrHeaderStatus(auth, prId, "WAITING RECEIVE", poNo);
+
+    const poFileName = `${poNo.replace(/\//g, "_")}.pdf`;
+    const poFilePath = path.join(PO_PDF_DIR, poFileName);
+    uploadToDrive(poFilePath, poFileName, auth, GOOGLE_DRIVE_PO_FOLDER_ID).then(async (driveLink) => {
+      const finalLink = driveLink || `${getAppUrl(req)}/api/pdf/po/${poNo.replace(/\//g, "_")}.pdf`;
+      await updatePoHeaderPdfLink(auth, poNo, finalLink);
+    }).catch(err => console.warn(`[PO] Drive Backup upload failed: ${err.message}`));
+
+    res.json({ success: true, poNo, pdfLink: poPdfUrl });
+  } catch (error: any) {
+    handleApiError(res, error, "PO_CREATE_NORMALIZED");
+  }
+});
+
+app.post("/api/pr/finish", requireRoles(["PURCHASE", "PURCHASING", "ADMIN"]), async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    await updatePrHeaderStatus(auth, safeText(req.body.prId), "FINISH");
+    res.json({ success: true });
+  } catch (error: any) {
+    handleApiError(res, error, "PR_FINISH_NORMALIZED");
+  }
+});
+
+app.put("/api/pr/:index", requireAdmin, async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const editIndex = parseInt(req.params.index, 10);
+    const body = req.body;
+    const detailRow = (await sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A${editIndex}:J${editIndex}`))[0] || [];
+    const oldPrId = safeText(detailRow[1] || body.id);
+    const newPrId = safeText(body.id || oldPrId);
+    const header = await findPrHeader(auth, oldPrId);
+    if (!header) return res.status(404).json({ success: false, message: "PR header not found" });
+
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A${header.rowIndex}:K${header.rowIndex}`, [[
+      newPrId,
+      body.date || header.date,
+      body.requester || header.requester,
+      body.division || header.division,
+      body.supplier || header.supplier,
+      body.notes || header.notes,
+      body.status || header.status,
+      body.mgrApp || header.mgrApproval,
+      body.dirApp || header.dirApproval,
+      body.pdfLink || header.pdfLink,
+      body.poNumber || header.poNo,
+    ]]);
+
+    if (newPrId !== oldPrId) {
+      const detailIds = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!B2:B`);
+      for (let i = 0; i < detailIds.length; i++) {
+        if (safeText(detailIds[i][0]) === oldPrId) {
+          await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!B${i + 2}`, [[newPrId]]);
+        }
+      }
+    }
+
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!C${editIndex}:J${editIndex}`, [[
+      body.itemName,
+      body.unit,
+      body.qty,
+      body.stockOnhand,
+      body.avgSales,
+      body.b1,
+      body.b2,
+      body.b3,
+    ]]);
+
+    res.json({ success: true });
+  } catch (error: any) {
+    handleApiError(res, error, "EDIT_PR_NORMALIZED");
+  }
+});
+
+app.delete("/api/admin/pr/:index", requireAdmin, async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const index = parseInt(req.params.index, 10);
+    const row = (await sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!B${index}:B${index}`))[0] || [];
+    const prId = safeText(row[0]);
+    if (!prId) return res.status(404).json({ success: false, message: "PR detail row not found" });
+
+    const detailRows = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!B2:B`);
+    const detailRowNumbers = detailRows
+      .map((r: any[], i: number) => safeText(r[0]) === prId ? i + 2 : -1)
+      .filter((n: number) => n !== -1);
+    await deleteSheetRows(auth, NORMALIZED_SHEETS.PR_DETAIL, detailRowNumbers);
+
+    const headerRows = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A2:A`);
+    const headerRowNumbers = headerRows
+      .map((r: any[], i: number) => safeText(r[0]) === prId ? i + 2 : -1)
+      .filter((n: number) => n !== -1);
+    await deleteSheetRows(auth, NORMALIZED_SHEETS.PR_HEADER, headerRowNumbers);
+
+    res.json({ success: true });
+  } catch (error: any) {
+    handleApiError(res, error, "ADMIN_PR_DELETE_NORMALIZED");
+  }
+});
+
+// WhatsApp diagnostics APIs
 app.get("/api/wa-diagnostics", async (req, res) => {
   try {
     const token = getWaToken();
@@ -1786,479 +2377,6 @@ app.post("/api/wa-test-send", async (req, res) => {
   }
 });
 
-app.get("/api/po", async (req, res) => {
-  try {
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PO!A2:U", // Expanded range
-    });
-    const rows = response.data.values || [];
-    const pos = rows.map((row, i) => ({
-      rowIndex: i + 2,
-      prId: row[0],
-      purchaseName: row[1],
-      poNo: row[2],
-      date: row[3],
-      deliveryDate: row[4],
-      supplier: row[5],
-      itemName: row[6],
-      unit: row[7],
-      qty: row[8],
-      price: row[9],
-      total: row[10],
-      notes: row[11],
-      pdfLink: row[12] ? String(row[12]).trim() : `/api/pdf/po/${String(row[2] || "").trim().replace(/\//g, '_')}.pdf`,
-      status: row[13],
-      division: row[14], 
-      discount: row[15], 
-      tax: row[16],      
-      others: row[17],   
-      grandTotal: row[18],
-      discountPercent: row[19], // T
-      taxPercent: row[20]       // U
-    }));
-    res.json(pos.reverse()); // Newest first
-  } catch (error) {
-    handleApiError(res, error, "PO_LIST");
-  }
-});
-
-app.post("/api/pr/approve", async (req, res) => {
-  try {
-    const { prId, role, user, action, reason } = req.body;
-    console.log(`[APPROVE] Request: prId=${prId}, role=${role}, user=${user}, action=${action}`);
-    
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:S",
-    });
-    const rows = response.data.values || [];
-    
-    let newStatus = "";
-    if (action === "REJECT") newStatus = "Rejected";
-    else if (action === "PENDING") {
-      const roleUp = String(role || "").toUpperCase();
-      newStatus = roleUp === "MANAGER" || roleUp === "MGR" ? "WAITING MANAGER APPROVAL" : "WAITING DIREKTUR APPROVAL";
-    }
-    else {
-      const firstMatch = rows.find(row => row[0] && String(row[0]).trim() === String(prId).trim());
-      const currentStatus = firstMatch ? firstMatch[11] : "";
-      const roleUp = String(role || "").toUpperCase();
-
-      if (roleUp === "MANAGER" || roleUp === "MGR") {
-        newStatus = "WAITING DIREKTUR APPROVAL";
-      } else if (roleUp === "DIREKTUR" || roleUp === "DIR") {
-        newStatus = "WAITING CREATED PO";
-      } else if (roleUp === "ADMIN") {
-        if (currentStatus === "WAITING MANAGER APPROVAL") newStatus = "WAITING DIREKTUR APPROVAL";
-        else newStatus = "WAITING CREATED PO";
-      }
-    }
-
-    const matchingIndices = rows
-      .map((row, index) => (row[0] && String(row[0]).trim() === String(prId).trim() ? index : -1))
-      .filter(index => index !== -1);
-
-    console.log(`[APPROVE] Found ${matchingIndices.length} matching rows for PR ${prId}`);
-
-    for (const rowIndex of matchingIndices) {
-      const currentRow = rows[rowIndex];
-      const currentStatus = currentRow[11];
-
-      // Update Status (Column L = 11)
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `Rekap_PR!L${rowIndex + 1}`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [[newStatus]] }
-      });
-
-      // Update Approver details
-      if (action === "APPROVE") {
-        let approverCol = "";
-        const roleUp = String(role || "").toUpperCase().trim();
-        const firstMatch = rows.find(row => row[0] && String(row[0]).trim() === String(prId).trim());
-        const rowStatus = currentRow[11] || (firstMatch ? firstMatch[11] : "");
-        const statusUp = String(rowStatus || "").toUpperCase().trim();
-        
-        console.log(`[APPROVE] Evaluating role: ${roleUp}, status: ${statusUp}`);
-
-        if (roleUp === 'MANAGER' || roleUp === 'MGR' || (roleUp === 'ADMIN' && statusUp === 'WAITING MANAGER APPROVAL')) {
-          approverCol = 'M';
-        } else if (roleUp === 'DIREKTUR' || roleUp === 'DIR' || (roleUp === 'ADMIN' && statusUp === 'WAITING DIREKTUR APPROVAL')) {
-          approverCol = 'N';
-        }
-
-        if (approverCol) {
-          const approvalText = `${user} (APPROVE)`;
-          console.log(`[APPROVE] Updating column ${approverCol} for row ${rowIndex + 1} with ${approvalText}`);
-          await sheets.spreadsheets.values.update({
-            spreadsheetId: SPREADSHEET_ID,
-            range: `Rekap_PR!${approverCol}${rowIndex + 1}`,
-            valueInputOption: "USER_ENTERED",
-            requestBody: { values: [[approvalText]] }
-          });
-        }
-      }
-
-      if (action === "REJECT" && reason) {
-        const currentNote = currentRow[10] || "";
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SPREADSHEET_ID,
-          range: `Rekap_PR!K${rowIndex + 1}`,
-          valueInputOption: "USER_ENTERED",
-          requestBody: { values: [[currentNote + " | REJECTED: " + reason]] }
-        });
-      }
-    }
-
-    if (newStatus === "WAITING DIREKTUR APPROVAL") {
-      const matchingRows = rows.filter(row => row[0] && String(row[0]).trim() === String(prId).trim());
-      if (matchingRows.length > 0) {
-        const firstRow = matchingRows[0];
-        const prDetails = {
-          requester: firstRow[2],
-          division: firstRow[3],
-          supplier: firstRow[4],
-          notes: firstRow[10],
-          items: matchingRows.map(row => ({
-            itemName: row[5],
-            qty: row[7]
-          }))
-        };
-        // Notify Direktur in background (pass user who approved it)
-        notifyDirekturPR(prId, prDetails, user, req).catch(err => {
-          console.error("[WHATSAPP] Direktur approval notification failed:", err.message);
-        });
-      }
-    }
-
-    // Extract requester name to notify them
-    let prRequester = "";
-    const creatorRows = rows.filter(row => row[0] && String(row[0]).trim() === String(prId).trim());
-    if (creatorRows.length > 0) {
-      prRequester = creatorRows[0][2];
-    }
-
-    // Notify the creator of the PR (requester) about the status change
-    notifyPRApprovalChange(
-      prId,
-      user,
-      role,
-      newStatus,
-      action === "REJECT",
-      reason,
-      prRequester,
-      req
-    ).catch(err => {
-      console.error("[WHATSAPP] Approval notification failed:", err.message);
-    });
-
-    // Sync with PR_Detail summary sheet
-    await syncPrDetailRow(prId, auth);
-
-    res.json({ success: true });
-  } catch (error: any) {
-    handleApiError(res, error, "APPROVE");
-  }
-});
-
-app.post(["/api/po", "/api/po/create"], async (req, res) => {
-  try {
-    const { prId, purchaseName, supplier, deliveryDate, items, notes, discount, tax, others, subTotal, grandTotal, discountPercent, taxPercent, division } = req.body;
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    
-    // Generate Sequential PO Number: PO/SAU/05/2026/XXXX
-    const poData = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PO!C:C",
-    });
-    const poRows = poData.data.values || [];
-    let nextPoNum = 1;
-    if (poRows.length > 1) {
-      const nums = poRows.slice(1).map(row => {
-        const match = String(row[0]).match(/(\d+)$/);
-        return match ? parseInt(match[1]) : 0;
-      });
-      nextPoNum = Math.max(...nums, 0) + 1;
-    }
-    const poNo = `PO/SAU/05/2026/${String(nextPoNum).padStart(4, '0')}`;
-    const date = new Date().toISOString().split('T')[0];
-
-    // Create PO PDF from Template
-    await createPoPdf(poNo, {
-      prId, 
-      purchaseName, 
-      supplier, 
-      deliveryDate, 
-      items,
-      notes,
-      discount,
-      tax,
-      others,
-      subTotal,
-      grandTotal,
-      discountPercent,
-      taxPercent,
-      division
-    }, auth);
-
-    const poPdfUrl = `/api/pdf/po/${poNo.replace(/\//g, '_')}.pdf`;
-
-    // Upload to PO Drive folder in the background as backup
-    const poFileName = `${poNo.replace(/\//g, "_")}.pdf`;
-    const poFilePath = path.join(PO_PDF_DIR, poFileName);
-    uploadToDrive(poFilePath, poFileName, auth, GOOGLE_DRIVE_PO_FOLDER_ID).then(async (driveLink) => {
-      console.log(`[PO] Drive Backup upload result for ${poNo}: ${driveLink || 'FAILED'}`);
-      if (driveLink) {
-        try {
-          const currentPoData = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: "Rekap_PO!C:C"
-          });
-          const poRows = currentPoData.data.values || [];
-          for (let i = 0; i < poRows.length; i++) {
-            if (poRows[i][0] === poNo) {
-              await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `Rekap_PO!M${i + 1}`,
-                valueInputOption: "USER_ENTERED",
-                requestBody: { values: [[driveLink]] }
-              });
-              console.log(`[PO] Updated Rekap_PO row ${i + 1} with Drive Link: ${driveLink}`);
-            }
-          }
-        } catch (sheetErr: any) {
-          console.error(`[PO] Failed to update Sheets with Google Drive link:`, sheetErr.message);
-        }
-      } else {
-        const absolutePoPdfUrl = `${getAppUrl(req)}/api/pdf/po/${poNo.replace(/\//g, '_')}.pdf`;
-        try {
-          const currentPoData = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: "Rekap_PO!C:C"
-          });
-          const poRows = currentPoData.data.values || [];
-          for (let i = 0; i < poRows.length; i++) {
-            if (poRows[i][0] === poNo) {
-              await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `Rekap_PO!M${i + 1}`,
-                valueInputOption: "USER_ENTERED",
-                requestBody: { values: [[absolutePoPdfUrl]] }
-              });
-              console.log(`[PO] Updated Rekap_PO row ${i + 1} with absolute local fallback URL`);
-            }
-          }
-        } catch (sheetErr: any) {
-          console.error(`[PO] Failed to update Sheets with absolute local link fallback:`, sheetErr.message);
-        }
-      }
-    }).catch(err => {
-      console.warn(`[PO] Drive Backup upload failed: ${err.message}`);
-    });
-
-    // Get PR data once for status updates
-    const prData = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:F",
-    });
-    const prTable = prData.data.values || [];
-
-    // Process all items
-    const rowsToAppend: any[][] = [];
-    const cleanPrId = String(prId || "").trim().toUpperCase();
-
-    for (const item of items) {
-      const cleanItemName = String(item.itemName || "").trim().toUpperCase();
-      // Find row in Rekap_PR to update status
-      const rowIndex = prTable.findIndex(row => 
-        row[0] && String(row[0]).trim().toUpperCase() === cleanPrId && 
-        row[5] && String(row[5]).trim().toUpperCase() === cleanItemName
-      );
-      
-      if (rowIndex !== -1) {
-        // Update Rekap_PR: Status is index 11 (L), PO is index 15 (P)
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SPREADSHEET_ID,
-          range: `Rekap_PR!L${rowIndex + 1}`,
-          valueInputOption: "USER_ENTERED",
-          requestBody: { values: [["WAITING RECEIVE"]] }
-        });
-
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SPREADSHEET_ID,
-          range: `Rekap_PR!P${rowIndex + 1}`,
-          valueInputOption: "USER_ENTERED",
-          requestBody: { values: [[poNo]] }
-        });
-      }
-
-      // Find division from PR table
-      const prMatch = prTable.find(row => row[0] && String(row[0]).trim().toUpperCase() === cleanPrId);
-      const prDivision = prMatch ? prMatch[3] : "";
-      const selectedDev = division || prDivision || "";
-
-      // Prepare row for Rekap_PO
-      rowsToAppend.push([
-        prId,            // A: NO PR
-        purchaseName,    // B: NAMA PURCHASE
-        poNo,            // C: NO PO
-        date,            // D: TANGGAL PO
-        deliveryDate,    // E: TANGGAL KIRIM
-        supplier,        // F: SUPPLIER
-        item.itemName,   // G: NAMA BARANG
-        item.unit || "", // H: SATUAN
-        item.qty,        // I: QTY
-        item.price,      // J: HARGA SATUAN
-        item.qty * item.price, // K: HARGA TOTAL
-        notes || "",     // L: CATATAN
-        poPdfUrl,        // M: LINK PDF PO
-        "PO CREATED",    // N: STATUS PO
-        selectedDev,     // O: DIVISION
-        discount || 0,   // P: DISCOUNT
-        tax || 0,        // Q: TAX
-        others || 0,     // R: OTHERS
-        grandTotal || 0, // S: GRAND TOTAL
-        discountPercent || 0, // T: DISCOUNT %
-        taxPercent || 0      // U: TAX %
-      ]);
-    }
-
-    // Append all rows to Rekap_PO
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PO!A:U",
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: rowsToAppend
-      }
-    });
-
-    // Sync with PR_Detail summary sheet
-    await syncPrDetailRow(prId, auth);
-
-    res.json({ success: true, poNo, pdfLink: poPdfUrl });
-  } catch (error: any) {
-    handleApiError(res, error, "PO_CREATE");
-  }
-});
-
-app.post("/api/pr/finish", async (req, res) => {
-  try {
-    const { prId } = req.body;
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:A",
-    });
-    const rows = response.data.values || [];
-    const cleanPrId = String(prId || "").trim().toUpperCase();
-    const matchingIndices = rows
-      .map((row, index) => (row[0] && String(row[0]).trim().toUpperCase() === cleanPrId ? index : -1))
-      .filter(index => index !== -1);
-
-    for (const rowIndex of matchingIndices) {
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `Rekap_PR!L${rowIndex + 1}`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [["FINISH"]] }
-      });
-    }
-    // Sync with PR_Detail summary sheet
-    await syncPrDetailRow(prId, auth);
-
-    res.json({ success: true });
-  } catch (error: any) {
-    handleApiError(res, error, "PR_FINISH");
-  }
-});
-
-// --- ADMIN SETTINGS APIs ---
-
-app.put("/api/pr/:index", async (req, res) => {
-  try {
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    const editIndex = parseInt(req.params.index); // 1-indexed from frontend
-    const { id: prId, date, requester, division, supplier, itemName, unit, qty, stockOnhand, avgSales, notes, status, pdfLink, poNumber, b1, b2, b3 } = req.body;
-    
-    console.log(`[EDIT] Request for row ${editIndex}, PR ID ${prId}`);
-
-    // Get all rows to find matching PR IDs
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Rekap_PR!A:S",
-    });
-    const rows = response.data.values || [];
-    
-    // Find all rows with the same PR ID
-    const matchingIndices = rows
-      .map((row, index) => (row[0] && String(row[0]).trim() === String(prId).trim() ? index : -1))
-      .filter(index => index !== -1);
-
-    console.log(`[EDIT] Updating ${matchingIndices.length} rows for PR ${prId}`);
-
-    // Update shared header fields for all rows of this PR
-    for (const rowIndex of matchingIndices) {
-      // Columns: A(0):ID, B(1):Date, C(2):Req, D(3):Div, E(4):Sup, L(11):Status, O(14):PDF, P(15):PO
-      // We update these shared fields for every row in the PR
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `Rekap_PR!A${rowIndex + 1}:E${rowIndex + 1}`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [[prId, date, requester, division, supplier]] }
-      });
-      
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `Rekap_PR!L${rowIndex + 1}`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [[status]] }
-      });
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `Rekap_PR!O${rowIndex + 1}:P${rowIndex + 1}`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [[pdfLink, poNumber]] }
-      });
-    }
-
-    // Update the specific row's item details (using the absolute index passed)
-    // Row index in sheet = editIndex (since frontend passed rowIndex which is 1-indexed absolute)
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Rekap_PR!F${editIndex}:K${editIndex}`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[itemName, unit, qty, stockOnhand, avgSales, notes]] }
-    });
-    
-    // Update B1, B2, B3 (Columns Q, R, S) for the specific row
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Rekap_PR!Q${editIndex}:S${editIndex}`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[b1, b2, b3]] }
-    });
-
-    // Sync with PR_Detail summary sheet
-    await syncPrDetailRow(prId, auth);
-
-    res.json({ success: true });
-  } catch (error: any) { 
-    handleApiError(res, error, "EDIT_PR");
-  }
-});
-
 // 1. Users Management
 app.get("/api/admin/users", async (req, res) => {
   try {
@@ -2266,7 +2384,8 @@ app.get("/api/admin/users", async (req, res) => {
     const sheets = getSheets(auth);
     const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: "User_Role!A2:H" });
     const rows = response.data.values || [];
-    res.json(rows.map((r, i) => ({ id: i + 2, username: r[0], password: r[1], fullName: r[2], division: r[3], divCode: r[4], wa: r[5], role: r[6], access: r[7] })));
+    // Do not expose password hashes or legacy plaintext passwords to the client.
+    res.json(rows.map((r, i) => sanitizePublicUser(r, i)));
   } catch (error: any) {
     handleApiError(res, error, "ADMIN_USERS_GET");
   }
@@ -2277,11 +2396,14 @@ app.post("/api/admin/users", async (req, res) => {
     const auth = getAuthFromRequest(req);
     const sheets = getSheets(auth);
     const { username, password, fullName, division, divCode, wa, role, access } = req.body;
+    if (!String(username || "").trim() || !String(password || "")) {
+      return res.status(400).json({ success: false, message: "Username dan password wajib diisi." });
+    }
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: "User_Role!A:H",
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[username, password, fullName, division, divCode, wa, role, access]] }
+      requestBody: { values: [[username, hashPassword(String(password)), fullName, division, divCode, wa, role, access]] }
     });
     res.json({ success: true });
   } catch (error: any) {
@@ -2312,11 +2434,18 @@ app.put("/api/admin/users/:index", async (req, res) => {
     const sheets = getSheets(auth);
     const index = parseInt(req.params.index);
     const { username, password, fullName, division, divCode, wa, role, access } = req.body;
+    const currentRowRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `User_Role!A${index}:H${index}`,
+    });
+    const currentRow = currentRowRes.data.values?.[0] || [];
+    const existingPassword = String(currentRow[1] || "");
+    const passwordToStore = String(password || "") ? hashPassword(String(password)) : existingPassword;
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `User_Role!A${index}:H${index}`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[username, password, fullName, division, divCode, wa, role, access]] }
+      requestBody: { values: [[username, passwordToStore, fullName, division, divCode, wa, role, access]] }
     });
     res.json({ success: true });
   } catch (error: any) {
@@ -2384,38 +2513,6 @@ app.delete("/api/admin/stock/:index", async (req, res) => {
     res.json({ success: true });
   } catch (error: any) {
     handleApiError(res, error, "ADMIN_STOCK_DELETE");
-  }
-});
-
-app.delete("/api/admin/pr/:index", async (req, res) => {
-  try {
-    const auth = getAuthFromRequest(req);
-    const sheets = getSheets(auth);
-    const index = parseInt(req.params.index);
-
-    // Fetch the PR ID of the row before we delete it
-    const rowRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Rekap_PR!A${index}:A${index}`,
-    });
-    const prId = rowRes.data.values?.[0]?.[0];
-
-    // Delete the row from Rekap_PR
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ deleteDimension: { range: { sheetId: (await getSheetId("Rekap_PR", auth)), dimension: "ROWS", startIndex: index - 1, endIndex: index } } }]
-      }
-    });
-
-    // Sync with PR_Detail summary sheet
-    if (prId) {
-      await syncPrDetailRow(prId, auth);
-    }
-
-    res.json({ success: true });
-  } catch (error: any) {
-    handleApiError(res, error, "ADMIN_PR_DELETE");
   }
 });
 
@@ -2552,8 +2649,6 @@ app.get("/api/pdf/po/:id", async (req, res) => {
   console.warn(`[PDF-PO] File not found anywhere: ${filePath}`);
   res.status(404).send("File not found");
 });
-
-app.get("/api/po", (req, res) => res.json(poList));
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

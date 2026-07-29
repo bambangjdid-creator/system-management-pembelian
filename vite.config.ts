@@ -16,5 +16,19 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('react') || id.includes('framer-motion')) return 'vendor-react';
+            if (id.includes('firebase')) return 'vendor-firebase';
+            if (id.includes('chart.js') || id.includes('react-chartjs-2')) return 'vendor-charts';
+            if (id.includes('sweetalert2')) return 'vendor-swal';
+            return undefined;
+          },
+        },
+      },
+    },
   };
 });
