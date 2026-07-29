@@ -1802,6 +1802,7 @@ app.post("/api/login", async (req, res) => {
     }
 
     if (userRow) {
+      /*
       // Opportunistic migration: legacy plaintext passwords are upgraded on successful login.
       const storedPassword = String(userRow[1] || "");
       if (storedPassword && !isPasswordHash(storedPassword) && rowNumber > 0) {
@@ -1812,6 +1813,7 @@ app.post("/api/login", async (req, res) => {
           requestBody: { values: [[hashPassword(inputPass)]] }
         });
       }
+      */
 
       const publicUser = sanitizePublicUser(userRow);
       return res.json({
