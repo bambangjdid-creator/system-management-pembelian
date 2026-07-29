@@ -225,7 +225,7 @@ Halo, ini adalah pesan uji coba otomatis dari *PR-PO Management System Pro*. Jik
                   className="w-full text-slate-700 bg-white border border-slate-200 outline-none rounded-xl px-4 py-2.5 text-sm font-bold focus:border-indigo-500 shadow-sm transition"
                 >
                   <option value="">-- Pilih Pengguna --</option>
-                  {data?.systemUsers.filter(u => u.telegramChatId).map(user => (
+                  {data?.systemUsers?.filter(u => u.telegramChatId).map(user => (
                     <option key={user.username} value={user.telegramChatId}>
                       {user.displayName} ({user.role})
                     </option>

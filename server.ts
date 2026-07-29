@@ -2843,22 +2843,34 @@ app.get("/api/admin/telegram/diagnostics", async (req, res) => {
       message: "TELEGRAM_BOT_TOKEN is not configured in environment variables.",
       botInfo: null,
       webhookInfo: null,
+      systemUsers: [],
     });
   }
   try {
-    const [botInfoRes, webhookInfoRes] = await Promise.all([
+    const [botInfoRes, webhookInfoRes, users] = await Promise.all([
       sendTelegramRequest("getMe", {}),
       sendTelegramRequest("getWebhookInfo", {}),
+      getNotificationUsers(),
     ]);
 
+    const systemUsers = users.map(u => ({
+      username: u.username,
+      displayName: u.displayName || u.username,
+      role: u.role,
+      telegramChatId: u.telegramChatId || "",
+    }));
+
     res.json({
-      success: botInfoRes?.ok && webhookInfoRes?.ok,
-      message: botInfoRes?.ok && webhookInfoRes?.ok ? "Telegram connection is healthy." : "There may be an issue with the Telegram connection.",
-      botInfo: botInfoRes,
-      webhookInfo: webhookInfoRes,
+      success: botInfoRes?.ok,
+      tokenSet: true,
+      webhookUrlSet: !!TELEGRAM_WEBHOOK_URL,
+      message: botInfoRes?.ok ? "Telegram connection is healthy." : "There may be an issue with the Telegram connection.",
+      botInfo: botInfoRes?.result || null,
+      webhookInfo: webhookInfoRes?.result || null,
+      systemUsers,
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: `An exception occurred: ${error.message}` });
+    res.status(500).json({ success: false, message: `An exception occurred: ${error.message}`, systemUsers: [] });
   }
 });
 
