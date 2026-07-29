@@ -45,9 +45,9 @@ export default function TelegramDiagnostics({ apiFetch }: Props) {
 
   // Test Form State
   const [testTarget, setTestTarget] = useState("");
-  const [testMessage, setTestMessage] = useState("🔔 *TES KONEKTIVITAS TELEGRAM* 🔔
+  const [testMessage, setTestMessage] = useState(`🔔 *TES KONEKTIVITAS TELEGRAM* 🔔
 
-Halo, ini adalah pesan uji coba otomatis dari *PR-PO Management System Pro*. Jika Anda menerima ini, bot Telegram berfungsi normal!");
+Halo, ini adalah pesan uji coba otomatis dari *PR-PO Management System Pro*. Jika Anda menerima ini, bot Telegram berfungsi normal!`);
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
