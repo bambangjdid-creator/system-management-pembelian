@@ -64,6 +64,25 @@ interface Props {
   apiFetch: (url: string, options?: any) => Promise<any>;
 }
 
+const messageTemplates: { [key: string]: { label: string; message: string } } = {
+  test: {
+    label: "Tes Konektivitas",
+    message: `🔔 *TES KONEKTIVITAS WHATSAPP GW* 🔔\n\nHalo, ini adalah pesan uji coba otomatis dari *PR-PO Management System Pro*. Uji koneksi WhatsApp Gateway berhasil dengan lancar!`,
+  },
+  pr_baru: {
+    label: "Notifikasi PR Baru",
+    message: `🔔 *PERMINTAAN PERSETUJUAN PR BARU* 🔔\n\nNomor PR: #PR-2024-123\nDibuat oleh: Staff Gudang\n\nMohon untuk segera direview dan diberikan persetujuan. Terima kasih.`,
+  },
+  pr_approved: {
+    label: "Notifikasi PR Disetujui",
+    message: `✅ *PR DISETUJUI* ✅\n\nNomor PR: #PR-2024-123\nDisetujui oleh: Manager Pembelian\n\nPR telah disetujui dan akan segera diproses menjadi PO.`,
+  },
+  po_created: {
+    label: "Notifikasi PO Dibuat",
+    message: `📦 *PURCHASE ORDER (PO) DIBUAT* 📦\n\nNomor PO: #PO-2024-123\nSupplier: PT. Sinar Jaya\nTotal: Rp 1.250.000\n\nPO telah dibuat dan dikirimkan ke supplier.`,
+  },
+};
+
 export default function WhatsAppDiagnosticsPanel({ apiFetch }: Props) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DiagnosticsData | null>(null);
@@ -75,9 +94,8 @@ export default function WhatsAppDiagnosticsPanel({ apiFetch }: Props) {
 
   // Test Form State
   const [testTarget, setTestTarget] = useState("");
-  const [testMessage, setTestMessage] = useState(
-    `🔔 *TES KONEKTIVITAS WHATSAPP GW* 🔔\n\nHalo, ini adalah pesan uji coba otomatis dari *PR-PO Management System Pro*. Uji koneksi WhatsApp Gateway berhasil dengan lancar!`
-  );
+  const [selectedTemplate, setSelectedTemplate] = useState("test");
+  const [testMessage, setTestMessage] = useState(messageTemplates.test.message);
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -199,6 +217,14 @@ export default function WhatsAppDiagnosticsPanel({ apiFetch }: Props) {
       Swal.fire("Error Koneksi", err.message || "Gagal menghubungi server pengenal.", "error");
     } finally {
       setSendingTest(false);
+    }
+  };
+
+  const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const templateKey = e.target.value;
+    setSelectedTemplate(templateKey);
+    if (messageTemplates[templateKey]) {
+      setTestMessage(messageTemplates[templateKey].message);
     }
   };
 
@@ -503,7 +529,22 @@ export default function WhatsAppDiagnosticsPanel({ apiFetch }: Props) {
 
             <form onSubmit={handleSendTestMessage} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-500 font-bold uppercase tracking-wider block">Nomor Target WA Uji Coba</label>
+                <label className="text-xs text-slate-500 font-bold uppercase tracking-wider block">Pilih Penerima Otomatis (dari Kontak WA Aktif)</label>
+                <select
+                  value={testTarget}
+                  onChange={e => setTestTarget(e.target.value)}
+                  className="w-full text-slate-700 bg-white border border-slate-200 outline-none rounded-xl px-4 py-2.5 text-sm font-bold focus:border-indigo-500 shadow-sm transition"
+                >
+                  <option value="">-- Pilih Pengguna --</option>
+                  {data?.systemUsers.filter(u => u.wa).map(user => (
+                    <option key={user.username} value={user.wa}>
+                      {user.displayName} ({user.role}) - {user.wa}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-500 font-bold uppercase tracking-wider block">Nomor Target WA Manual</label>
                 <div className="relative">
                   <input 
                     type="text" 
@@ -515,9 +556,22 @@ export default function WhatsAppDiagnosticsPanel({ apiFetch }: Props) {
                   />
                   <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 font-black text-sm">@</span>
                 </div>
-                <p className="text-slate-400 text-[10px]">Masukkan nomor WhatsApp lengkap yang aktif di HP Anda untuk menerima notifikasi penguji.</p>
+                <p className="text-slate-400 text-[10px]">Masukkan nomor WhatsApp atau pilih dari daftar di atas.</p>
               </div>
-
+               <div className="space-y-1.5">
+                <label className="text-xs text-slate-500 font-bold uppercase tracking-wider block">Pilih Template Pesan</label>
+                <select
+                  value={selectedTemplate}
+                  onChange={handleTemplateChange}
+                  className="w-full text-slate-700 bg-white border border-slate-200 outline-none rounded-xl px-4 py-2.5 text-sm font-bold focus:border-indigo-500 shadow-sm transition"
+                >
+                  {Object.entries(messageTemplates).map(([key, template]) => (
+                    <option key={key} value={key}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="space-y-1.5">
                 <label className="text-xs text-slate-500 font-bold uppercase tracking-wider block">Template Isi Pesan Diagnosa</label>
                 <textarea 
