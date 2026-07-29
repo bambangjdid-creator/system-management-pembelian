@@ -2836,6 +2836,31 @@ app.get("/api/admin/telegram/diagnostics", async (req, res) => {
   }
 });
 
+app.post("/api/admin/telegram/send-test", async (req, res) => {
+  if (!TELEGRAM_BOT_TOKEN) {
+    return res.status(400).json({ success: false, message: "Telegram Bot Token is not configured." });
+  }
+  try {
+    const { chatId, message } = req.body;
+    if (!chatId || !message) {
+      return res.status(400).json({ success: false, message: "chatId and message are required." });
+    }
+
+    const response = await sendTelegramRequest("sendMessage", {
+      chat_id: chatId,
+      text: message,
+    });
+
+    if (response && response.ok) {
+      return res.json({ success: true, message: `Message sent successfully to Chat ID: ${chatId}`, details: response });
+    } else {
+      return res.status(500).json({ success: false, message: "Failed to send message via Telegram.", details: response });
+    }
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: `An exception occurred: ${error.message}` });
+  }
+});
+
 // 2. Master Stock Management
 app.get("/api/admin/stock", async (req, res) => {
   try {
