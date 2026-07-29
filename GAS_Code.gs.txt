@@ -1,0 +1,158 @@
+/**
+ * Code.gs - Server-side Logic
+ */
+
+const SS_ID = '1Ne5xeN2zEmScf9CVX5x9WguQZPM0Vk6dzQJ-n7xRfWU';
+const TEMPLATE_PR_ID = '1dNTmJEUxtXHyI044udxsKE6BBg1gnuJy55i2DzyuP9A';
+const TEMPLATE_PO_ID = '14vYhIYIofui-HEY7rTo7oWD_DpGVPCLfj5atDKEpRio';
+const FOLDER_PR_ID = '1GjYzgLWqoCt6FzihhD6q5xsv0MYYRb0c';
+const FOLDER_PO_ID = '1N6GwnHBE-RZcsTI1cbzmsWG-_zslN0qE';
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('PR & PO Management System')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+/**
+ * AUTH LOGIC
+ */
+function checkLogin(username, password) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheet = ss.getSheetByName('User_Role'); // Menggunakan nama sheet User_Role sesuai struktur kolom
+    if (!sheet) throw new Error('Sheet User_Role tidak ditemukan');
+    
+    const data = sheet.getDataRange().getValues();
+    
+    for (let i = 1; i < data.length; i++) {
+      // data[i][0] = Username, data[i][1] = Password
+      if (data[i][0].toString().trim() == username.toString().trim() && 
+          data[i][1].toString().trim() == password.toString().trim()) {
+        return {
+          username: data[i][0],
+          displayName: data[i][2], // Full_Name
+          division: data[i][3],
+          divisionCode: data[i][4],
+          wa: data[i][5],          // WA_NUMBER
+          role: data[i][6],        // ROLE
+          access: data[i][7]       // AKSES_MENU
+        };
+      }
+    }
+    throw new Error('Username atau Password salah');
+  } catch (e) {
+    throw new Error(e.message || 'Terjadi kesalahan sistem login');
+  }
+}
+
+/**
+ * MASTER DATA
+ */
+function getMasterStock() {
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const sheet = ss.getSheetByName('Master_Stock');
+  const data = sheet.getDataRange().getValues();
+  
+  const results = [];
+  for (let i = 1; i < data.length; i++) {
+    results.push({
+      name: data[i][0],      // Nama Barang
+      category: data[i][1],  // Kategori
+      supplier: data[i][2],  // Supplier
+      unit: data[i][3]       // Satuan
+    });
+  }
+  return results;
+}
+
+/**
+ * PR LOGIC
+ */
+function submitPR(prData) {
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const sheet = ss.getSheetByName('Rekap_PR');
+  
+  const lastRow = sheet.getLastRow();
+  const nextNum = (lastRow < 2) ? 1 : lastRow;
+  const prNo = `PR${String(nextNum).padStart(4, '0')}/${prData.divCode}/V/2026`;
+  
+  const rowData = [
+    prNo,
+    new Date(),
+    prData.requester,
+    prData.division,
+    prData.supplier,
+    prData.itemName,
+    prData.unit,
+    prData.qty,
+    prData.stockOnhand,
+    prData.avgSales,
+    prData.notes,
+    'Pending Manager',
+    '', // Manager Approval
+    '', // Direktur Approval
+    '', // Link PDF
+    '', // Nomor PO
+    prData.b1,
+    prData.b2,
+    prData.b3
+  ];
+  
+  sheet.appendRow(rowData);
+  return { success: true, prNo: prNo };
+}
+
+/**
+ * PO LOGIC
+ */
+function createPO(poData) {
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const sheet = ss.getSheetByName('Rekap_PO');
+  
+  const lastRow = sheet.getLastRow();
+  const nextNum = (lastRow < 2) ? 1 : lastRow;
+  const poNo = `PO/05/2026/${String(nextNum).padStart(4, '0')}`;
+  
+  const rowData = [
+    poData.prNo,
+    poData.purchaseName,
+    poNo,
+    new Date(),
+    poData.deliveryDate,
+    poData.supplier,
+    poData.itemName,
+    poData.unit,
+    poData.qty,
+    poData.price,
+    poData.totalPrice,
+    poData.notes,
+    '', // Link PDF
+    'Open'
+  ];
+  
+  sheet.appendRow(rowData);
+  updatePRStatus(poData.prNo, 'Processed', poNo);
+  
+  return { success: true, poNo: poNo };
+}
+
+function updatePRStatus(prNo, status, poNo) {
+  const ss = SpreadsheetApp.openById(SS_ID);
+  const sheet = ss.getSheetByName('Rekap_PR');
+  const data = sheet.getDataRange().getValues();
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == prNo) {
+      sheet.getRange(i + 1, 12).setValue(status);
+      if (poNo) sheet.getRange(i + 1, 16).setValue(poNo);
+      break;
+    }
+  }
+}

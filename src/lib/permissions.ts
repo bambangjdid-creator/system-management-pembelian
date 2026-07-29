@@ -1,37 +1,44 @@
 import type { AppUser } from './types';
 
+const normalize = (value: unknown) => String(value || '').trim().toUpperCase();
+const accessList = (value: unknown) => normalize(value).split(',').map(m => m.trim().replace(/^"|"$/g, '')).filter(Boolean);
+
 export function isAdmin(user?: AppUser | null) {
-  const role = String(user?.role || '').toUpperCase();
-  const divCode = String(user?.divisionCode || user?.divCode || '').toUpperCase().trim();
+  const role = normalize(user?.role);
+  const divCode = normalize(user?.divisionCode || user?.divCode);
   return role.includes('ADMIN') || divCode === 'ADMIN';
+}
+
+export function isApprover(user?: AppUser | null) {
+  const role = normalize(user?.role);
+  const divCode = normalize(user?.divisionCode || user?.divCode);
+  return role.includes('MANAGER') || role.includes('MANAJER') ||
+    role.includes('DIREKTUR') || role.includes('DIREKSI') ||
+    role.includes('MGR') || role.includes('DIR') ||
+    role.includes('KABAG') || role.includes('KADIV') ||
+    divCode === 'MGR' || divCode === 'DIR';
+}
+
+export function isPurchase(user?: AppUser | null) {
+  const role = normalize(user?.role);
+  const divCode = normalize(user?.divisionCode || user?.divCode);
+  return role.includes('PURCHASE') || role.includes('PURCHASING') || divCode === 'PUR' || divCode === 'PCH';
 }
 
 export function canSee(user: AppUser | null | undefined, menu: string) {
   if (!user) return false;
-  const role = String(user.role || '').toUpperCase();
   if (isAdmin(user)) return true;
 
-  const menuUp = menu.toUpperCase();
-  const divCode = String(user.divisionCode || user.divCode || '').toUpperCase();
+  const menuUp = normalize(menu);
+  const explicitAccess = accessList(user.access);
+  if (explicitAccess.includes(menuUp)) return true;
 
-  if (menuUp === 'APPROVAL') {
-    const isApprover = role.includes('MANAGER') || role.includes('MANAJER') ||
-      role.includes('DIREKTUR') || role.includes('DIREKSI') ||
-      role.includes('MGR') || role.includes('DIR') ||
-      role.includes('KABAG') || role.includes('KADIV') ||
-      divCode === 'MGR' || divCode === 'DIR';
-    if (isApprover) return true;
-  }
+  // Safe defaults to avoid a blank app when ACCESS is empty or imported with bad CSV quoting.
+  // Sensitive actions are still protected server-side by role/session middleware.
+  if (['DASHBOARD', 'PR HISTORY', 'PO HISTORY', 'CREATE PR'].includes(menuUp)) return true;
+  if (menuUp === 'APPROVAL') return isApprover(user);
+  if (menuUp === 'PURCHASE') return isPurchase(user);
+  if (menuUp === 'SETTINGS') return false;
 
-  if (['PR HISTORY', 'PO HISTORY', 'DASHBOARD'].includes(menuUp)) {
-    const isHighLevel = role.includes('MANAGER') || role.includes('MANAJER') ||
-      role.includes('DIREKTUR') || role.includes('DIREKSI') ||
-      role.includes('MGR') || role.includes('DIR') ||
-      role.includes('ADMIN') || role.includes('PURCHASE') ||
-      divCode === 'MGR' || divCode === 'DIR';
-    if (isHighLevel) return true;
-  }
-
-  const accessList = String(user.access || '').toUpperCase().split(',').map(m => m.trim());
-  return accessList.includes(menuUp);
+  return false;
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import Swal from 'sweetalert2';
 import { createApiFetch } from '../../lib/api';
@@ -16,12 +16,16 @@ const firebaseConfig = {
   messagingSenderId: viteEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || ''
 };
 
-const firebaseApp = initializeApp(firebaseConfig);
-const firebaseAuth = getAuth(firebaseApp);
-const googleProvider = new GoogleAuthProvider();
-googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
-googleProvider.addScope('https://www.googleapis.com/auth/drive');
-googleProvider.addScope('https://www.googleapis.com/auth/documents');
+function hasFirebaseConfig() {
+  return Boolean(firebaseConfig.apiKey && firebaseConfig.appId && firebaseConfig.projectId && firebaseConfig.authDomain);
+}
+
+function getFirebaseApp(): FirebaseApp {
+  if (!hasFirebaseConfig()) {
+    throw new Error('Firebase OAuth config belum lengkap. Isi VITE_FIREBASE_* di .env atau abaikan tombol Google Drive.');
+  }
+  return getApps()[0] || initializeApp(firebaseConfig);
+}
 
 export type LoginData = { username: string; password: string };
 
@@ -50,6 +54,12 @@ export function useAuth() {
   const handleGoogleLogin = async () => {
     try {
       setIsAuthLoading(true);
+      const firebaseAuth = getAuth(getFirebaseApp());
+      const googleProvider = new GoogleAuthProvider();
+      googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
+      googleProvider.addScope('https://www.googleapis.com/auth/drive');
+      googleProvider.addScope('https://www.googleapis.com/auth/documents');
+
       const result = await signInWithPopup(firebaseAuth, googleProvider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken;
