@@ -118,134 +118,36 @@ export default function PoForm() {
           </div>
 
           <div className="space-y-4">
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Item & Pricing Details</label>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Item Details</label>
               <div className="space-y-3 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
                 {poForm.items.map((item, idx) => (
                   <div key={idx} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                     <div className="md:col-span-4">
+                     <div className="md:col-span-6">
                         <p className="text-[10px] text-slate-400 font-bold uppercase mb-0.5">Item Name</p>
                         <p className="font-bold text-slate-700 text-sm truncate">{item.itemName}</p>
                      </div>
-                     <div className="md:col-span-2 text-center">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-0.5">Quantity</p>
-                        <p className="font-bold text-slate-700 text-sm">{item.qty} {item.unit}</p>
+                     <div className="md:col-span-3">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-0.5">Satuan</p>
+                        <p className="font-bold text-slate-700 text-sm">{item.unit || '-'}</p>
                      </div>
                      <div className="md:col-span-3">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-0.5 text-right">Unit Price (IDR)</p>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">Rp</span>
-                          <input 
-                            type="number" 
-                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-lg text-sm font-bold focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all text-right"
-                            placeholder="0"
-                            value={item.price}
-                            onChange={e => {
-                              const newItems = [...poForm.items];
-                              newItems[idx].price = e.target.value;
-                              setPoForm({...poForm, items: newItems});
-                            }}
-                            required
-                          />
-                        </div>
-                     </div>
-                     <div className="md:col-span-3 text-right">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-0.5">Item Total</p>
-                        <p className="font-black text-indigo-600 text-sm">
-                          Rp {(Number(item.qty || 0) * Number(item.price || 0)).toLocaleString('id-ID')}
-                        </p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase mb-0.5">Quantity</p>
+                        <p className="font-bold text-slate-700 text-sm">{item.qty}</p>
                      </div>
                   </div>
                 ))}
               </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
-              <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Internal Notes for PO</label>
-                    <textarea 
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium" 
-                        rows={4} 
-                        placeholder="Notes for vendor or logistics..."
-                        value={poForm.notes} 
-                        onChange={e => setPoForm({...poForm, notes: e.target.value})}
-                    ></textarea>
-                  </div>
-              </div>
-
-              <div className="bg-slate-50 p-6 rounded-3xl space-y-3 border border-slate-100">
-                   {(() => {
-                     const subTotal = poForm.items.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 0)), 0);
-                     const discountNominal = (subTotal * Number(poForm.discountPercent || 0)) / 100;
-                     const taxNominal = (subTotal * Number(poForm.taxPercent || 0)) / 100;
-                     const grandTotal = subTotal - discountNominal + taxNominal + Number(poForm.others || 0);
-
-                     return (
-                       <>
-                         <div className="flex justify-between items-center text-slate-500">
-                            <p className="text-[10px] font-black uppercase tracking-widest">Sub Total</p>
-                            <p className="font-bold text-sm">Rp {subTotal.toLocaleString('id-ID')}</p>
-                         </div>
-                         
-                         <div className="space-y-1">
-                           <div className="flex justify-between items-center gap-4">
-                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">Discount (%)</label>
-                              <div className="flex items-center gap-2">
-                                <input 
-                                  type="number" 
-                                  className="w-16 px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-right focus:ring-2 focus:ring-red-500 outline-none"
-                                  placeholder="0"
-                                  value={poForm.discountPercent}
-                                  onChange={e => setPoForm({...poForm, discountPercent: Number(e.target.value)})}
-                                />
-                                <span className="text-[10px] font-bold text-slate-400">%</span>
-                              </div>
-                           </div>
-                           <div className="flex justify-end">
-                              <p className="text-[10px] font-bold text-red-500">- Rp {discountNominal.toLocaleString('id-ID')}</p>
-                           </div>
-                         </div>
-                         
-                         <div className="space-y-1">
-                           <div className="flex justify-between items-center gap-4">
-                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">Pajak / Tax (%)</label>
-                              <div className="flex items-center gap-2">
-                                <input 
-                                  type="number" 
-                                  className="w-16 px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-right focus:ring-2 focus:ring-indigo-500 outline-none"
-                                  placeholder="0"
-                                  value={poForm.taxPercent}
-                                  onChange={e => setPoForm({...poForm, taxPercent: Number(e.target.value)})}
-                                />
-                                <span className="text-[10px] font-bold text-slate-400">%</span>
-                              </div>
-                           </div>
-                           <div className="flex justify-end">
-                              <p className="text-[10px] font-bold text-indigo-500">+ Rp {taxNominal.toLocaleString('id-ID')}</p>
-                           </div>
-                         </div>
-                         
-                         <div className="flex justify-between items-center gap-4">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">Lain-lain (+)</label>
-                            <input 
-                              type="number" 
-                              className="w-32 px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-right focus:ring-2 focus:ring-indigo-500 outline-none"
-                              placeholder="0"
-                              value={poForm.others}
-                              onChange={e => setPoForm({...poForm, others: Number(e.target.value)})}
-                            />
-                         </div>
-
-                         <div className="pt-4 mt-2 border-t border-slate-200 flex justify-between items-center">
-                            <p className="text-xs font-black text-slate-800 uppercase tracking-widest">Total Bayar</p>
-                            <p className="text-2xl font-black text-indigo-600">
-                              Rp {grandTotal.toLocaleString('id-ID')}
-                            </p>
-                         </div>
-                       </>
-                     );
-                   })()}
-              </div>
+          <div className="space-y-2 pt-4">
+             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Internal Notes for PO</label>
+             <textarea 
+                 className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-medium" 
+                 rows={4} 
+                 placeholder="Notes for vendor or logistics..."
+                 value={poForm.notes} 
+                 onChange={e => setPoForm({...poForm, notes: e.target.value})}
+             ></textarea>
           </div>
 
           <div className="pt-4 flex gap-4">

@@ -496,7 +496,7 @@ export default function App() {
         itemName: item.itemName,
         qty: item.qty,
         unit: item.unit,
-        price: '',
+        price: '0',
       })),
       notes: info.notes || '',
       purchaseName: user.displayName,

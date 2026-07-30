@@ -121,7 +121,7 @@ export default function PoList() {
               <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Supplier</th>
               <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Tgl Kirim</th>
               <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Qty</th>
-              <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Total</th>
+              <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Satuan</th>
               <th className="px-8 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">PDF</th>
             </tr>
           </thead>
@@ -132,7 +132,8 @@ export default function PoList() {
                   // Use grandTotal from the spreadsheet (Column S)
                   const totalAmount = Number(group[0]?.grandTotal || 0);
                   const totalQty = group.reduce((sum, item) => sum + Number(item.qty), 0);
-                  return { ...group[0], totalAmount, totalQty };
+                  const units = Array.from(new Set(group.map(item => item.unit).filter(Boolean))).join(', ') || 'PCS';
+                  return { ...group[0], totalAmount, totalQty, units };
               })
               .filter(po => {
                 if (!po) return false;
@@ -163,9 +164,7 @@ export default function PoList() {
                 </td>
                 <td className="px-8 py-4 text-center text-xs text-slate-600 font-bold">{po.deliveryDate || '-'}</td>
                 <td className="px-8 py-4 text-center text-xs font-bold text-slate-700">{po.totalQty}</td>
-                <td className="px-8 py-4 text-center text-xs font-black text-slate-900 leading-none">
-                  Rp {po.totalAmount.toLocaleString('id-ID')}
-                </td>
+                <td className="px-8 py-4 text-center text-xs font-bold text-slate-700">{po.units}</td>
                 <td className="px-8 py-4">
                    <div className="flex justify-center">
                       <button onClick={() => openPODetail(po)} className="p-2 bg-indigo-55 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors">
