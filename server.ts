@@ -107,7 +107,7 @@ function createRateLimiter(options: { windowMs: number; max: number; label: stri
 }
 
 const apiRateLimiter = createRateLimiter({ windowMs: 60_000, max: 300, label: "api" });
-const loginRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5, label: "login" });
+const loginRateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 100, label: "login" });
 app.use("/api", apiRateLimiter);
 app.use("/api/login", loginRateLimiter);
 
