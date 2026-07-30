@@ -69,25 +69,13 @@ const isAllowedLocalDevOrigin = (origin: string) => !isProduction && /^https?:\/
 const isLocalNetworkOrigin = (origin: string) => /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(origin);
 
 app.use(cors({
-  origin(origin, callback) {
-    // Allow non-browser/server-to-server calls with no Origin header.
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || isAllowedLocalDevOrigin(origin) || isLocalNetworkOrigin(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error("Not allowed by CORS"));
-  },
+  origin: true,
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Session-Token"],
   exposedHeaders: ["X-Google-Token-Expired"],
   maxAge: 86400,
 }));
-app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (err?.message === "Not allowed by CORS") {
-    return res.status(403).json({ success: false, message: "Origin is not allowed by CORS." });
-  }
-  next(err);
-});
 app.use(express.json({ limit: "1mb" }));
 
 app.use((req, res, next) => {
