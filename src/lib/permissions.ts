@@ -31,10 +31,13 @@ export function canSee(user: AppUser | null | undefined, menu: string) {
 
   const menuUp = normalize(menu);
   const explicitAccess = accessList(user.access);
-  if (explicitAccess.includes(menuUp)) return true;
 
-  // Safe defaults to avoid a blank app when ACCESS is empty or imported with bad CSV quoting.
-  // Sensitive actions are still protected server-side by role/session middleware.
+  // If user has a configured access string, strictly follow it
+  if (user.access && String(user.access).trim() !== '') {
+    return explicitAccess.includes(menuUp);
+  }
+
+  // Safe defaults for legacy/new users who don't have access configured yet
   if (['DASHBOARD', 'PR HISTORY', 'PO HISTORY', 'CREATE PR'].includes(menuUp)) return true;
   if (menuUp === 'APPROVAL') return isApprover(user);
   if (menuUp === 'PURCHASE') return isPurchase(user);
