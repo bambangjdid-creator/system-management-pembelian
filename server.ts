@@ -1151,8 +1151,172 @@ async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePa
     return { filePath };
 
   } catch (error: any) {
-    console.error(`[PO-DOCS] Template error: ${error.message}. Using fallback.`);
-    throw error;
+    console.error(`[PO-DOCS] Template error: ${error.message}. Using PDFKit fallback.`);
+    
+    const doc = new PDFDocument({ margin: 30, size: "A4" });
+    const stream = fs.createWriteStream(filePath);
+    doc.pipe(stream);
+
+    // 1. Logo Block & Company Title
+    doc.rect(30, 30, 50, 40).fill("#16a34a"); // Green color for PO
+    doc.font("Helvetica-Bold").fontSize(18).fillColor("#FFFFFF").text("sau", 30, 42, { width: 50, align: "center" });
+    doc.fillColor("#000000").fontSize(18).font("Helvetica-Bold").text("CV. SUMBER ALODIE UTAMA", 90, 40);
+
+    // 2. Right Title "PURCHASE ORDER" in a grey-green rounded border box
+    const titleBoxWidth = 160;
+    const titleBoxHeight = 30;
+    doc.fillColor("#f0fdf4").roundedRect(565 - titleBoxWidth, 35, titleBoxWidth, titleBoxHeight, 5).fill();
+    doc.lineWidth(0.5).strokeColor("#bbf7d0").roundedRect(565 - titleBoxWidth, 35, titleBoxWidth, titleBoxHeight, 5).stroke();
+    doc.fillColor("#16a34a").font("Helvetica-Bold").fontSize(11).text("PURCHASE ORDER", 565 - titleBoxWidth, 44, { width: titleBoxWidth, align: "center" });
+
+    // 3. Thick divider line below logo and title
+    doc.moveTo(30, 80).lineTo(565, 80).lineWidth(2).strokeColor("#000000").stroke();
+
+    // 4. Two-column Metadata Grid
+    doc.lineWidth(0.5).fillColor("#000000").font("Helvetica").fontSize(9);
+    
+    // Column 1
+    doc.font("Helvetica-Bold").text("PEMINTA", 30, 95);
+    doc.font("Helvetica").text(`:  ${data.purchaseName || "-"}`, 120, 95);
+
+    doc.font("Helvetica-Bold").text("TANGGAL PO", 30, 115);
+    doc.font("Helvetica").text(`:  ${new Date().toLocaleDateString('id-ID')}`, 120, 115);
+
+    doc.font("Helvetica-Bold").text("DIVISI / GUDANG", 30, 135);
+    doc.font("Helvetica").text(`:  ${divisionDisplay || "-"}`, 120, 135);
+
+    doc.font("Helvetica-Bold").text("SUPPLIER", 30, 155);
+    doc.font("Helvetica").text(`:  ${data.supplier || "-"}`, 120, 155);
+
+    // Column 2
+    doc.font("Helvetica-Bold").text("NO. PO", 320, 95);
+    doc.font("Helvetica").text(`:  ${poNo}`, 400, 95);
+
+    doc.font("Helvetica-Bold").text("NO. PR REFERENSI", 320, 115);
+    doc.font("Helvetica").text(`:  ${data.prId || "-"}`, 400, 115);
+
+    doc.font("Helvetica-Bold").text("CATATAN", 320, 135);
+    
+    // Catatan border box
+    doc.rect(320, 147, 245, 30).lineWidth(0.5).strokeColor("#000000").stroke();
+    doc.font("Helvetica").text(data.notes || "-", 325, 151, { width: 235, height: 22 });
+
+    // 5. Divider text
+    doc.font("Helvetica").fontSize(10).fillColor("#000000").text("Detail pemesanan barang sebagai berikut :", 30, 190);
+
+    // 6. Double-tier Header Table starting at Y = 210
+    let curY = 210;
+    
+    // Headers background
+    doc.rect(30, curY, 535, 20).fill("#16a34a"); // Green fill
+    doc.fillColor("#FFFFFF"); // White text for headers
+    doc.lineWidth(0.5).strokeColor("#000000");
+
+    // Grid lines for Header
+    doc.moveTo(30, curY).lineTo(565, curY).stroke();
+    doc.moveTo(30, curY + 20).lineTo(565, curY + 20).stroke();
+    
+    doc.moveTo(30, curY).lineTo(30, curY + 20).stroke();
+    doc.moveTo(60, curY).lineTo(60, curY + 20).stroke();
+    doc.moveTo(270, curY).lineTo(270, curY + 20).stroke();
+    doc.moveTo(320, curY).lineTo(320, curY + 20).stroke();
+    doc.moveTo(370, curY).lineTo(370, curY + 20).stroke();
+    doc.moveTo(465, curY).lineTo(465, curY + 20).stroke();
+    doc.moveTo(565, curY).lineTo(565, curY + 20).stroke();
+
+    // Header Texts
+    doc.font("Helvetica-Bold").fontSize(8.5);
+    doc.text("No.", 30, curY + 6, { width: 30, align: "center" });
+    doc.text("Nama Barang", 60, curY + 6, { width: 210, align: "center" });
+    doc.text("Satuan", 270, curY + 6, { width: 50, align: "center" });
+    doc.text("Qty", 320, curY + 6, { width: 50, align: "center" });
+    doc.text("Harga Satuan", 370, curY + 6, { width: 95, align: "center" });
+    doc.text("Total Harga", 465, curY + 6, { width: 100, align: "center" });
+
+    // Table rows - Draw at least 10 rows
+    curY += 20;
+    doc.font("Helvetica").fontSize(8.5).fillColor("#000000");
+    
+    const rowCount = Math.max(10, data.items.length);
+    const rowHeight = 20;
+    
+    for (let i = 0; i < rowCount; i++) {
+      const rowY = curY + i * rowHeight;
+      const item = data.items[i];
+      
+      const itemNo = item ? String(i + 1) : "";
+      const itemName = item ? String(item.itemName || "-") : "";
+      const unit = item ? String(item.unit || "PCS") : "";
+      const qty = item ? String(item.qty || "0") : "";
+      const price = item ? `Rp ${Number(item.price || 0).toLocaleString('id-ID')}` : "";
+      const totalItem = item ? `Rp ${(Number(item.qty || 0) * Number(item.price || 0)).toLocaleString('id-ID')}` : "";
+      
+      doc.moveTo(30, rowY).lineTo(30, rowY + rowHeight).stroke();
+      doc.moveTo(60, rowY).lineTo(60, rowY + rowHeight).stroke();
+      doc.moveTo(270, rowY).lineTo(270, rowY + rowHeight).stroke();
+      doc.moveTo(320, rowY).lineTo(320, rowY + rowHeight).stroke();
+      doc.moveTo(370, rowY).lineTo(370, rowY + rowHeight).stroke();
+      doc.moveTo(465, rowY).lineTo(465, rowY + rowHeight).stroke();
+      doc.moveTo(565, rowY).lineTo(565, rowY + rowHeight).stroke();
+      
+      doc.moveTo(30, rowY + rowHeight).lineTo(565, rowY + rowHeight).stroke();
+      
+      if (item) {
+        doc.text(itemNo, 30, rowY + 6, { width: 30, align: "center" });
+        doc.text(itemName, 65, rowY + 6, { width: 200, align: "left" });
+        doc.text(unit, 270, rowY + 6, { width: 50, align: "center" });
+        doc.text(qty, 320, rowY + 6, { width: 50, align: "center" });
+        doc.text(price, 370, rowY + 6, { width: 95, align: "right" });
+        doc.text(totalItem, 465, rowY + 6, { width: 95, align: "right" });
+      }
+    }
+    
+    // 7. Summary rows starting at Y = curY + rowCount * rowHeight
+    let summaryY = curY + rowCount * rowHeight;
+    
+    // Subtotal Row
+    doc.rect(30, summaryY, 435, rowHeight).stroke();
+    doc.rect(465, summaryY, 100, rowHeight).stroke();
+    doc.font("Helvetica-Bold").text("SUBTOTAL", 30, summaryY + 6, { width: 425, align: "right" });
+    doc.font("Helvetica").text(`Rp ${subTotal.toLocaleString('id-ID')}`, 465, summaryY + 6, { width: 95, align: "right" });
+    summaryY += rowHeight;
+
+    // Diskon Row
+    doc.rect(30, summaryY, 435, rowHeight).stroke();
+    doc.rect(465, summaryY, 100, rowHeight).stroke();
+    doc.font("Helvetica-Bold").text(`DISKON (${discountPercent}%)`, 30, summaryY + 6, { width: 425, align: "right" });
+    doc.font("Helvetica").text(`Rp ${discount.toLocaleString('id-ID')}`, 465, summaryY + 6, { width: 95, align: "right" });
+    summaryY += rowHeight;
+
+    // Pajak Row
+    doc.rect(30, summaryY, 435, rowHeight).stroke();
+    doc.rect(465, summaryY, 100, rowHeight).stroke();
+    doc.font("Helvetica-Bold").text(`PAJAK (${taxPercent}%)`, 30, summaryY + 6, { width: 425, align: "right" });
+    doc.font("Helvetica").text(`Rp ${tax.toLocaleString('id-ID')}`, 465, summaryY + 6, { width: 95, align: "right" });
+    summaryY += rowHeight;
+
+    // Lain-lain Row
+    doc.rect(30, summaryY, 435, rowHeight).stroke();
+    doc.rect(465, summaryY, 100, rowHeight).stroke();
+    doc.font("Helvetica-Bold").text("LAIN-LAIN", 30, summaryY + 6, { width: 425, align: "right" });
+    doc.font("Helvetica").text(`Rp ${others.toLocaleString('id-ID')}`, 465, summaryY + 6, { width: 95, align: "right" });
+    summaryY += rowHeight;
+
+    // GRAND TOTAL Row
+    doc.rect(30, summaryY, 435, rowHeight).fill("#16a34a");
+    doc.rect(465, summaryY, 100, rowHeight).fill("#16a34a");
+    doc.fillColor("#FFFFFF").font("Helvetica-Bold");
+    doc.rect(30, summaryY, 435, rowHeight).stroke();
+    doc.rect(465, summaryY, 100, rowHeight).stroke();
+    doc.text("GRAND TOTAL", 30, summaryY + 6, { width: 425, align: "right" });
+    doc.text(`Rp ${grandTotal.toLocaleString('id-ID')}`, 465, summaryY + 6, { width: 95, align: "right" });
+    doc.fillColor("#000000");
+
+    doc.end();
+    return new Promise((resolve, reject) => {
+      stream.on("finish", () => resolve({ filePath }));
+      stream.on("error", reject);
+    });
   }
 }
 
