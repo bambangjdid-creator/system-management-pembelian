@@ -3130,14 +3130,24 @@ app.get("/api/pdf/po/:id", async (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
-    app.use(vite.middlewares);
+  const distPath = path.join(process.cwd(), "dist");
+  const distIndexExists = fs.existsSync(path.join(distPath, "index.html"));
+
+  if (distIndexExists) {
+    // Production mode: serve pre-built static files from dist/
+    console.log("[SERVER] Mode: PRODUCTION (serving static files from dist/)");
+    app.use(express.static(distPath, { maxAge: "1h" }));
+    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
   } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
+    // Development mode: use Vite dev server (hot reload)
+    console.log("[SERVER] Mode: DEVELOPMENT (using Vite dev server)");
+    const vite = await createViteServer({
+      server: { middlewareMode: true, host: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
   }
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT}`);
     setupTelegram().catch(err => console.error("[TELEGRAM] Webhook setup failed:", err.message));
