@@ -132,6 +132,16 @@ app.use((req: any, res: any, next) => {
 });
 
 
+function formatIsoDateToIndonesian(isoDate: string): string {
+  if (!isoDate) return "-";
+  const parts = isoDate.split("-");
+  if (parts.length !== 3) return isoDate;
+  const year = parts[0];
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  return `${day}/${month}/${year}`;
+}
+
 // Helper untuk memformat private key agar kompatibel dengan Node.js crypto
 const getAuthClient = () => {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -996,6 +1006,7 @@ async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePa
         "{{PEMINTA}}": data.purchaseName,
         "{{NO_PO}}": poNo,
         "{{TANGGAL}}": new Date().toLocaleDateString('id-ID'),
+        "{{TANGGAL_KIRIM}}": formatIsoDateToIndonesian(data.deliveryDate),
         "{{DIVISI}}": divisionDisplay,
         "{{SUPPLIER}}": data.supplier,
         "{{CATATAN}}": data.notes || "-",
@@ -1089,6 +1100,7 @@ async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePa
       { replaceAllText: { containsText: { text: '{{PEMINTA}}', matchCase: false }, replaceText: data.purchaseName } },
       { replaceAllText: { containsText: { text: '{{NO_PO}}', matchCase: false }, replaceText: poNo } },
       { replaceAllText: { containsText: { text: '{{TANGGAL}}', matchCase: false }, replaceText: new Date().toLocaleDateString('id-ID') } },
+      { replaceAllText: { containsText: { text: '{{TANGGAL_KIRIM}}', matchCase: false }, replaceText: formatIsoDateToIndonesian(data.deliveryDate) } },
       { replaceAllText: { containsText: { text: '{{DIVISI}}', matchCase: false }, replaceText: divisionDisplay } },
       { replaceAllText: { containsText: { text: '{{SUPPLIER}}', matchCase: false }, replaceText: data.supplier } },
       { replaceAllText: { containsText: { text: '{{CATATAN}}', matchCase: false }, replaceText: data.notes || "-" } },
@@ -1190,16 +1202,19 @@ async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePa
 
     // Column 2
     doc.font("Helvetica-Bold").text("NO. PO", 320, 95);
-    doc.font("Helvetica").text(`:  ${poNo}`, 400, 95);
+    doc.font("Helvetica").text(`:  ${poNo}`, 420, 95);
 
     doc.font("Helvetica-Bold").text("NO. PR REFERENSI", 320, 115);
-    doc.font("Helvetica").text(`:  ${data.prId || "-"}`, 400, 115);
+    doc.font("Helvetica").text(`:  ${data.prId || "-"}`, 420, 115);
 
-    doc.font("Helvetica-Bold").text("CATATAN", 320, 135);
+    doc.font("Helvetica-Bold").text("TANGGAL KIRIM", 320, 135);
+    doc.font("Helvetica").text(`:  ${formatIsoDateToIndonesian(data.deliveryDate) || "-"}`, 420, 135);
+
+    doc.font("Helvetica-Bold").text("CATATAN", 320, 155);
     
     // Catatan border box
-    doc.rect(320, 147, 245, 30).lineWidth(0.5).strokeColor("#000000").stroke();
-    doc.font("Helvetica").text(data.notes || "-", 325, 151, { width: 235, height: 22 });
+    doc.rect(320, 167, 245, 18).lineWidth(0.5).strokeColor("#000000").stroke();
+    doc.font("Helvetica").text(data.notes || "-", 325, 171, { width: 235, height: 12 });
 
     // 5. Divider text
     doc.font("Helvetica").fontSize(10).fillColor("#000000").text("Detail pemesanan barang sebagai berikut :", 30, 190);
