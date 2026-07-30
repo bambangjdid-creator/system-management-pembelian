@@ -48,6 +48,7 @@ const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 8 * 60 * 6
 const APP_BASE_URL = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL || "";
+const GOOGLE_SCRIPT_WEB_APP_URL = process.env.GOOGLE_SCRIPT_WEB_APP_URL || "";
 
 if (!Number.isFinite(SESSION_TTL_SECONDS) || SESSION_TTL_SECONDS < 300) {
   throw new Error("SESSION_TTL_SECONDS must be a number >= 300");
@@ -536,7 +537,7 @@ app.post("/api/admin/telegram/send-test-message", requireAdmin, async (req, res)
 
 
 // Modified helpers to accept auth
-async function createPrPdf(prId: string, data: any, auth: any) {
+async function createPrPdf(prId: string, data: any, auth: any): Promise<{ filePath: string; driveLink?: string }> {
   const fileName = `${prId.replace(/\//g, "_")}.pdf`;
   const filePath = path.join(PDF_DIR, fileName);
   
@@ -553,6 +554,108 @@ async function createPrPdf(prId: string, data: any, auth: any) {
     const days = Math.round((Number(item.qty) * 30) / avg);
     return `${days} hari (Item: ${item.itemName})`;
   }).join(", ") + ` )`;
+
+  // 1. If Google Apps Script Web App is configured, use it to avoid Service Account quota limit
+  if (GOOGLE_SCRIPT_WEB_APP_URL) {
+    console.log(`[DOCS-PR] Delegating PDF generation for ${prId} to Google Apps Script Web App...`);
+    try {
+      const replacements: Record<string, string> = {
+        "{{No_PR}}": prId,
+        "{{Tanggal_Order}}": data.date,
+        "{{Nama_Peminta}}": data.requester,
+        "{{Divisi}}": data.division,
+        "{{Nama Supplier}}": data.supplier,
+        "{{Catatan}}": data.notes || "-",
+        "SUM{{Qty}}": String(totalQty),
+        "{{Estimasi}}": estimasiText,
+      };
+
+      if (data.items.length > 0) {
+        const firstItem = data.items[0];
+        replacements["{{NO}}"] = "1";
+        replacements["{{NAMA_BARANG}}"] = firstItem.itemName;
+        replacements["{{SATUAN}}"] = firstItem.unit;
+        replacements["{{QTY}}"] = String(firstItem.qty);
+        replacements["{{STOCK}}"] = String(firstItem.stockOnhand || 0);
+        replacements["{{AVG}}"] = String(Number(firstItem.avgSales || 0).toFixed(1));
+        replacements["{{B1}}"] = String(firstItem.b1 || 0);
+        replacements["{{B2}}"] = String(firstItem.b2 || 0);
+        replacements["{{B3}}"] = String(firstItem.b3 || 0);
+      } else {
+        replacements["{{NO}}"] = "";
+        replacements["{{NAMA_BARANG}}"] = "";
+        replacements["{{SATUAN}}"] = "";
+        replacements["{{QTY}}"] = "";
+        replacements["{{STOCK}}"] = "";
+        replacements["{{AVG}}"] = "";
+        replacements["{{B1}}"] = "";
+        replacements["{{B2}}"] = "";
+        replacements["{{B3}}"] = "";
+      }
+
+      data.items.forEach((item: any, i: number) => {
+        const idx = i + 1;
+        replacements[`{{No_${idx}}}`] = String(idx);
+        replacements[`{{Nama_Barang_${idx}}}`] = item.itemName;
+        replacements[`{{Satuan_${idx}}}`] = item.unit;
+        replacements[`{{Qty_${idx}}}`] = String(item.qty);
+        replacements[`{{Stock_${idx}}}`] = String(item.stockOnhand || 0);
+        replacements[`{{Avg_${idx}}}`] = String(Number(item.avgSales || 0).toFixed(1));
+        replacements[`{{B1_${idx}}}`] = String(item.b1 || 0);
+        replacements[`{{B2_${idx}}}`] = String(item.b2 || 0);
+        replacements[`{{B3_${idx}}}`] = String(item.b3 || 0);
+      });
+
+      for (let i = data.items.length + 1; i <= 10; i++) {
+        replacements[`{{No_${i}}}`] = "";
+        replacements[`{{Nama_Barang_${i}}}`] = "";
+        replacements[`{{Satuan_${i}}}`] = "";
+        replacements[`{{Qty_${i}}}`] = "";
+        replacements[`{{Stock_${i}}}`] = "";
+        replacements[`{{Avg_${i}}}`] = "";
+        replacements[`{{B1_${i}}}`] = "";
+        replacements[`{{B2_${i}}}`] = "";
+        replacements[`{{B3_${i}}}`] = "";
+      }
+
+      const response = await fetch(GOOGLE_SCRIPT_WEB_APP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId: TEMPLATE_PR_ID,
+          folderId: GOOGLE_DRIVE_FOLDER_ID,
+          fileName,
+          replacements,
+        }),
+      });
+
+      const result = (await response.json()) as any;
+      if (!result.success) {
+        throw new Error(result.error || "Unknown Apps Script error");
+      }
+
+      console.log(`[DOCS-PR] Apps Script generated PDF successfully. Downloading ID: ${result.fileId}...`);
+      
+      const drive = getDrive(auth);
+      const driveStream = await drive.files.get(
+        { fileId: result.fileId, alt: "media" },
+        { responseType: "stream" }
+      );
+      
+      const stream = fs.createWriteStream(filePath);
+      driveStream.data.pipe(stream);
+      await new Promise((resolve, reject) => {
+        stream.on("finish", resolve);
+        stream.on("error", reject);
+      });
+
+      console.log(`[DOCS-PR] PR ${prId} downloaded locally.`);
+      return { filePath, driveLink: result.webViewLink };
+
+    } catch (err: any) {
+      console.error(`[DOCS-PR] Apps Script method failed: ${err.message}. Falling back to old method...`);
+    }
+  }
 
   console.log(`[DOCS] Starting template merge for ${prId} using provided auth...`);
   
@@ -657,7 +760,7 @@ async function createPrPdf(prId: string, data: any, auth: any) {
     exportResponse.data.pipe(stream);
 
     await new Promise((resolve, reject) => {
-      stream.on('finish', () => resolve(filePath));
+      stream.on('finish', () => resolve({ filePath }));
       stream.on('error', (err) => {
         console.error(`[STREAM] Export stream error: ${err.message}`);
         reject(err);
@@ -672,7 +775,7 @@ async function createPrPdf(prId: string, data: any, auth: any) {
     }
 
     console.log(`[DOCS] PR ${prId} generated successfully from template.`);
-    return filePath;
+    return { filePath };
 
   } catch (error: any) {
     console.error(`[DOCS] Template merge error: ${error.message}. Using PDFKit fallback.`);
@@ -832,18 +935,136 @@ async function createPrPdf(prId: string, data: any, auth: any) {
 
     doc.end();
     return new Promise((resolve, reject) => {
-      stream.on("finish", () => resolve(filePath));
+      stream.on("finish", () => resolve({ filePath }));
       stream.on("error", reject);
     });
   }
 }
 
-async function createPoPdf(poNo: string, data: any, auth: any) {
+async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePath: string; driveLink?: string }> {
   const fileName = `${poNo.replace(/\//g, "_")}.pdf`;
   const filePath = path.join(PO_PDF_DIR, fileName);
   
   if (!fs.existsSync(PO_PDF_DIR)) {
     fs.mkdirSync(PO_PDF_DIR, { recursive: true });
+  }
+
+  // Pre-calculate subtotal
+  const subTotal = data.items.reduce((sum: number, item: any) => sum + (Number(item.qty) * Number(item.price)), 0);
+  const discount = Number(data.discount || 0);
+  const tax = Number(data.tax || 0);
+  const others = Number(data.others || 0);
+  const discountPercent = data.discountPercent || 0;
+  const taxPercent = data.taxPercent || 0;
+  const grandTotal = subTotal - discount + tax + others;
+
+  const WAREHOUSE_ADDRESSES: { [key: string]: { name: string, address: string } } = {
+    'GD PONCOL': {
+      name: 'GUDANG PONCOL',
+      address: 'JL. RAYA PONCOL NO.17 RT/RW 003/07 KEL. CIRACAS KEC. CIRACAS, KOTA JAKARTA TIMUR, DKI JAKARTA - 13750'
+    },
+    'GD CIRACAS': {
+      name: 'GUDANG CIRACAS',
+      address: 'JL. RAYA BOGOR KM 26 NO.2 RT/RW 005/01 KEL. CIRACAS KEC. CIRACAS KOTA JAKARTA TIMUR, DKI JAKARTA - 13750'
+    },
+    'GD NAGOYA': {
+      name: 'GUDANG NAGOYA',
+      address: 'JL. SWADAYA V NO. 50 RT/RW. 002/05 KEC. CILANGKAP KEL. CIPAYUNG KOTA JAKARTA TIMUR, DKI JAKARTA - 13870'
+    }
+  };
+
+  const divKey = String(data.division || '').toUpperCase().trim();
+  let divisionDisplay = "GUDANG UTAMA";
+  if (WAREHOUSE_ADDRESSES[divKey]) {
+    const info = WAREHOUSE_ADDRESSES[divKey];
+    divisionDisplay = `${info.name}\n${info.address}`;
+  } else {
+    const matchedKey = Object.keys(WAREHOUSE_ADDRESSES).find(k => divKey.includes(k) || k.includes(divKey));
+    if (matchedKey) {
+      const info = WAREHOUSE_ADDRESSES[matchedKey];
+      divisionDisplay = `${info.name}\n${info.address}`;
+    } else if (data.division) {
+      divisionDisplay = data.division;
+    }
+  }
+
+  // 1. If Google Apps Script Web App is configured, use it to avoid Service Account quota limit
+  if (GOOGLE_SCRIPT_WEB_APP_URL) {
+    console.log(`[DOCS-PO] Delegating PDF generation for ${poNo} to Google Apps Script Web App...`);
+    try {
+      const replacements: Record<string, string> = {
+        "{{PEMINTA}}": data.purchaseName,
+        "{{NO_PO}}": poNo,
+        "{{TANGGAL}}": new Date().toLocaleDateString('id-ID'),
+        "{{DIVISI}}": divisionDisplay,
+        "{{SUPPLIER}}": data.supplier,
+        "{{CATATAN}}": data.notes || "-",
+        "{{SUBTOTAL}}": `Rp ${subTotal.toLocaleString('id-ID')}`,
+        "{{DISKON}}": `Rp ${discount.toLocaleString('id-ID')}`,
+        "{{DISKON_PERSEN}}": `${discountPercent}%`,
+        "{{PAJAK}}": `Rp ${tax.toLocaleString('id-ID')}`,
+        "{{PAJAK_PERSEN}}": `${taxPercent}%`,
+        "{{OTHERS}}": `Rp ${others.toLocaleString('id-ID')}`,
+        "SUM{{TOTAL}}": `Rp ${grandTotal.toLocaleString('id-ID')}`,
+      };
+
+      data.items.forEach((item: any, i: number) => {
+        const idx = i + 1;
+        const totalItem = item.qty * item.price;
+        replacements[`{{NO_${idx}}}`] = String(idx);
+        replacements[`{{NAMA_BARANG_${idx}}}`] = item.itemName;
+        replacements[`{{SATUAN_${idx}}}`] = item.unit || "PCS";
+        replacements[`{{QTY_${idx}}}`] = String(item.qty);
+        replacements[`{{HARGA_${idx}}}`] = `Rp ${Number(item.price).toLocaleString('id-ID')}`;
+        replacements[`{{TOTAL_${idx}}}`] = `Rp ${totalItem.toLocaleString('id-ID')}`;
+      });
+
+      for (let i = data.items.length + 1; i <= 10; i++) {
+        replacements[`{{NO_${i}}}`] = "";
+        replacements[`{{NAMA_BARANG_${i}}}`] = "";
+        replacements[`{{SATUAN_${i}}}`] = "";
+        replacements[`{{QTY_${i}}}`] = "";
+        replacements[`{{HARGA_${i}}}`] = "";
+        replacements[`{{TOTAL_${i}}}`] = "";
+      }
+
+      const response = await fetch(GOOGLE_SCRIPT_WEB_APP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId: TEMPLATE_PO_ID,
+          folderId: GOOGLE_DRIVE_PO_FOLDER_ID,
+          fileName,
+          replacements,
+        }),
+      });
+
+      const result = (await response.json()) as any;
+      if (!result.success) {
+        throw new Error(result.error || "Unknown Apps Script error");
+      }
+
+      console.log(`[DOCS-PO] Apps Script generated PDF successfully. Downloading ID: ${result.fileId}...`);
+      
+      const drive = getDrive(auth);
+      const driveStream = await drive.files.get(
+        { fileId: result.fileId, alt: "media" },
+        { responseType: "stream" }
+      );
+      
+      const stream = fs.createWriteStream(filePath);
+      driveStream.data.pipe(stream);
+      await new Promise((resolve, reject) => {
+        stream.on("finish", resolve);
+        stream.on("error", reject);
+      });
+
+      console.log(`[DOCS-PO] PO ${poNo} downloaded locally.`);
+      return { filePath, driveLink: result.webViewLink };
+
+    } catch (err: any) {
+      console.error(`[DOCS-PO] Apps Script method failed: ${err.message}. Falling back to old method...`);
+    }
   }
 
   console.log(`[PO-DOCS] Starting template merge for ${poNo}...`);
@@ -864,44 +1085,6 @@ async function createPoPdf(poNo: string, data: any, auth: any) {
     if (!copyId) throw new Error("Failed to copy template");
 
     // 2. Replacement Data
-    const subTotal = data.items.reduce((sum: number, item: any) => sum + (Number(item.qty) * Number(item.price)), 0);
-    const discount = Number(data.discount || 0);
-    const tax = Number(data.tax || 0);
-    const others = Number(data.others || 0);
-    const discountPercent = data.discountPercent || 0;
-    const taxPercent = data.taxPercent || 0;
-    const grandTotal = subTotal - discount + tax + others;
-
-    const WAREHOUSE_ADDRESSES: { [key: string]: { name: string, address: string } } = {
-      'GD PONCOL': {
-        name: 'GUDANG PONCOL',
-        address: 'JL. RAYA PONCOL NO.17 RT/RW 003/07 KEL. CIRACAS KEC. CIRACAS, KOTA JAKARTA TIMUR, DKI JAKARTA - 13750'
-      },
-      'GD CIRACAS': {
-        name: 'GUDANG CIRACAS',
-        address: 'JL. RAYA BOGOR KM 26 NO.2 RT/RW 005/01 KEL. CIRACAS KEC. CIRACAS KOTA JAKARTA TIMUR, DKI JAKARTA - 13750'
-      },
-      'GD NAGOYA': {
-        name: 'GUDANG NAGOYA',
-        address: 'JL. SWADAYA V NO. 50 RT/RW. 002/05 KEC. CILANGKAP KEL. CIPAYUNG KOTA JAKARTA TIMUR, DKI JAKARTA - 13870'
-      }
-    };
-
-    const divKey = String(data.division || '').toUpperCase().trim();
-    let divisionDisplay = "GUDANG UTAMA";
-    if (WAREHOUSE_ADDRESSES[divKey]) {
-      const info = WAREHOUSE_ADDRESSES[divKey];
-      divisionDisplay = `${info.name}\n${info.address}`;
-    } else {
-      const matchedKey = Object.keys(WAREHOUSE_ADDRESSES).find(k => divKey.includes(k) || k.includes(divKey));
-      if (matchedKey) {
-        const info = WAREHOUSE_ADDRESSES[matchedKey];
-        divisionDisplay = `${info.name}\n${info.address}`;
-      } else if (data.division) {
-        divisionDisplay = data.division;
-      }
-    }
-
     const requests: any[] = [
       { replaceAllText: { containsText: { text: '{{PEMINTA}}', matchCase: false }, replaceText: data.purchaseName } },
       { replaceAllText: { containsText: { text: '{{NO_PO}}', matchCase: false }, replaceText: poNo } },
@@ -957,7 +1140,7 @@ async function createPoPdf(poNo: string, data: any, auth: any) {
     exportResponse.data.pipe(stream);
 
     await new Promise((resolve, reject) => {
-      stream.on('finish', () => resolve(filePath));
+      stream.on('finish', () => resolve({ filePath }));
       stream.on('error', (err) => reject(err));
     });
 
@@ -965,11 +1148,10 @@ async function createPoPdf(poNo: string, data: any, auth: any) {
     try { await drive.files.delete({ fileId: copyId }); } catch (e) {}
 
     console.log(`[PO-DOCS] PO ${poNo} generated successfully.`);
-    return filePath;
+    return { filePath };
 
   } catch (error: any) {
     console.error(`[PO-DOCS] Template error: ${error.message}. Using fallback.`);
-    // Fallback logic could be the PDFKit one if needed, but for now we throw
     throw error;
   }
 }
@@ -2413,7 +2595,7 @@ app.post(["/api/pr", "/api/pr/create"], requirePermission("CREATE PR"), async (r
       await appendSheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A:J`, detailRows);
     }
 
-    await createPrPdf(prId, {
+    const pdfResult = await createPrPdf(prId, {
       date,
       requester,
       division,
@@ -2427,10 +2609,15 @@ app.post(["/api/pr", "/api/pr/create"], requirePermission("CREATE PR"), async (r
 
     const fileName = `${prId.replace(/\//g, "_")}.pdf`;
     const filePath = path.join(PDF_DIR, fileName);
-    uploadToDrive(filePath, fileName, auth).then(async (driveLink) => {
-      const finalLink = driveLink || `${getAppUrl(req)}/api/pdf/pr/${prId.replace(/\//g, "_")}.pdf`;
-      await updatePrHeaderPdfLink(auth, prId, finalLink);
-    }).catch(err => console.warn(`[PR] Drive Backup upload failed: ${err.message}`));
+    
+    if (pdfResult && pdfResult.driveLink) {
+      await updatePrHeaderPdfLink(auth, prId, pdfResult.driveLink);
+    } else {
+      uploadToDrive(filePath, fileName, auth).then(async (driveLink) => {
+        const finalLink = driveLink || `${getAppUrl(req)}/api/pdf/pr/${prId.replace(/\//g, "_")}.pdf`;
+        await updatePrHeaderPdfLink(auth, prId, finalLink);
+      }).catch(err => console.warn(`[PR] Drive Backup upload failed: ${err.message}`));
+    }
 
     notifyNewPR(prId, { ...req.body, requester, division, divCode, items }, req).catch(err => {
       console.error("[WHATSAPP] New PR notification failed:", err.message);
@@ -2536,7 +2723,7 @@ app.post(["/api/po", "/api/po/create"], requireRoles(["PURCHASE", "PURCHASING", 
     const poPdfUrl = `/api/pdf/po/${poNo.replace(/\//g, "_")}.pdf`;
     const safeItems = Array.isArray(items) ? items : [];
 
-    await createPoPdf(poNo, {
+    const pdfResult = await createPoPdf(poNo, {
       prId,
       purchaseName,
       supplier,
@@ -2589,10 +2776,15 @@ app.post(["/api/po", "/api/po/create"], requireRoles(["PURCHASE", "PURCHASING", 
 
     const poFileName = `${poNo.replace(/\//g, "_")}.pdf`;
     const poFilePath = path.join(PO_PDF_DIR, poFileName);
-    uploadToDrive(poFilePath, poFileName, auth, GOOGLE_DRIVE_PO_FOLDER_ID).then(async (driveLink) => {
-      const finalLink = driveLink || `${getAppUrl(req)}/api/pdf/po/${poNo.replace(/\//g, "_")}.pdf`;
-      await updatePoHeaderPdfLink(auth, poNo, finalLink);
-    }).catch(err => console.warn(`[PO] Drive Backup upload failed: ${err.message}`));
+    
+    if (pdfResult && pdfResult.driveLink) {
+      await updatePoHeaderPdfLink(auth, poNo, pdfResult.driveLink);
+    } else {
+      uploadToDrive(poFilePath, poFileName, auth, GOOGLE_DRIVE_PO_FOLDER_ID).then(async (driveLink) => {
+        const finalLink = driveLink || `${getAppUrl(req)}/api/pdf/po/${poNo.replace(/\//g, "_")}.pdf`;
+        await updatePoHeaderPdfLink(auth, poNo, finalLink);
+      }).catch(err => console.warn(`[PO] Drive Backup upload failed: ${err.message}`));
+    }
 
     res.json({ success: true, poNo, pdfLink: poPdfUrl });
   } catch (error: any) {
