@@ -87,7 +87,7 @@ export default function PrList() {
           <option value="WAITING DIREKTUR APPROVAL">WAITING DIREKTUR APPROVAL</option>
           <option value="WAITING CREATED PO">WAITING CREATED PO</option>
           <option value="WAITING RECEIVE">WAITING RECEIVE</option>
-          <option value="FINISH">FINISH</option>
+          <option value="ALREADY RECEIVE">ALREADY RECEIVE</option>
           <option value="Rejected">Rejected</option>
         </select>
       </div>
@@ -142,10 +142,10 @@ export default function PrList() {
         <table className="w-full text-left">
           <thead className="bg-slate-50 border-b border-slate-100">
             <tr>
+              <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Tanggal PR</th>
               <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">PR ID</th>
               <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Requester</th>
               <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Status</th>
-              <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center whitespace-nowrap">Estimasi Datang</th>
               <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">PO Number</th>
               <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-center">PDF</th>
               <th className="px-8 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest text-right">Action</th>
@@ -178,7 +178,8 @@ export default function PrList() {
               })
               .map(pr => (
               <tr key={`${pr.id}-${pr.rowIndex}`} className="hover:bg-slate-50 transition-colors">
-                <td onClick={() => openPRDetail(pr)} className="px-8 py-4 font-bold text-indigo-600 border-l-4 border-l-transparent hover:border-l-indigo-500 text-xs cursor-pointer hover:underline transition-all text-center">{pr.id}</td>
+                <td className="px-8 py-4 text-center text-xs font-bold text-slate-600 whitespace-nowrap border-l-4 border-l-transparent">{pr.date || '-'}</td>
+                <td onClick={() => openPRDetail(pr)} className="px-8 py-4 font-bold text-indigo-600 hover:border-l-indigo-500 text-xs cursor-pointer hover:underline transition-all text-center">{pr.id}</td>
                 <td className="px-8 py-4">
                   <p className="font-bold text-slate-800 text-sm">{pr.requester}</p>
                   <p className="text-[10px] uppercase font-bold text-slate-400">{pr.division}</p>
@@ -190,14 +191,6 @@ export default function PrList() {
                     pr.status === 'Rejected' ? 'bg-red-50 text-red-600 border border-red-100' :
                     'bg-slate-50 text-slate-500 border border-slate-100'
                   }`}>{pr.status}</span>
-                </td>
-                <td className="px-8 py-4 text-center">
-                  <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100">
-                    {(() => {
-                      const linkedPO = poList.find(po => String(po.prId) === String(pr.id));
-                      return linkedPO?.deliveryDate || '-';
-                    })()}
-                  </span>
                 </td>
                 <td className="px-8 py-4 text-center">
                   <span className="text-[10px] font-bold text-slate-600 font-mono tracking-tighter">
