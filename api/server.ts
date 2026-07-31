@@ -1,6 +1,6 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+
 import cors from "cors";
 import { google } from "googleapis";
 import dotenv from "dotenv";
@@ -3584,6 +3584,7 @@ async function startServer() {
   } else {
     // Development mode: use Vite dev server (hot reload)
     console.log("[SERVER] Mode: DEVELOPMENT (using Vite dev server)");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true, host: true },
       appType: "spa",
