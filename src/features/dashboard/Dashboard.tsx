@@ -122,7 +122,7 @@ export default function Dashboard() {
         <StatCard title="Wait Direktur" value={stats.waitingDirector} icon={Clock} color="bg-orange-500" />
         <StatCard title="Wait PO" value={stats.waitingPO} icon={ShoppingBag} color="bg-blue-400" />
         <StatCard title="Wait Receive" value={stats.waitingReceive} icon={ShoppingBag} color="bg-cyan-500" />
-        <StatCard title="Finished" value={stats.finish} icon={CheckCircle2} color="bg-emerald-500" />
+        <StatCard title="Already Receive" value={stats.finish} icon={CheckCircle2} color="bg-emerald-500" />
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

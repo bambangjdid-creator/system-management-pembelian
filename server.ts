@@ -2677,7 +2677,7 @@ app.get("/api/stats", async (req, res) => {
       waitingDirector: statusCount(["WAITING DIREKTUR APPROVAL"]),
       waitingPO: statusCount(["WAITING CREATED PO"]),
       waitingReceive,
-      finish: statusCount(["FINISH"]),
+      finish: statusCount(["FINISH", "ALREADY RECEIVE"]),
       chartData: {
         labels: lastSixMonths,
         datasets: [
