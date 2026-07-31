@@ -1596,22 +1596,18 @@ async function notifyNewPR(prId: string, data: any, req?: any) {
     };
 
     const prDivision = String(data.division || "").toUpperCase().trim();
-    let targetManagerDivision = "";
-    if (prDivision.includes("CIRACAS") || prDivision === "GDC") {
-      targetManagerDivision = "TOKO";
-    } else if (prDivision.includes("PONCOL") || prDivision.includes("NAGOYA") || prDivision === "GDP" || prDivision === "GDN") {
-      targetManagerDivision = "GUDANG";
-    }
-
     let recipients = users.filter(u => u.wa && isManagerOnly(u.role));
     
-    if (targetManagerDivision) {
-      recipients = recipients.filter(u => {
-        const uDiv = String(u.division || "").toUpperCase().trim();
-        const uDivCode = String(u.divisionCode || "").toUpperCase().trim();
-        return uDiv.includes(targetManagerDivision) || uDivCode.includes(targetManagerDivision);
-      });
-    }
+    recipients = recipients.filter(u => {
+      const uDivRaw = String(u.division || "").trim().toUpperCase();
+      if (uDivRaw === "" || uDivRaw === "*" || uDivRaw === "ALL") return true;
+
+      const uDivs = uDivRaw.split(',').map(s => s.trim());
+      const uCodes = String(u.divisionCode || "").toUpperCase().split(',').map(s => s.trim());
+      
+      return uDivs.some(div => prDivision.includes(div) || div.includes(prDivision)) ||
+             uCodes.some(code => prDivision.includes(code) || code.includes(prDivision));
+    });
 
     if (recipients.length === 0) {
       console.log(`[WHATSAPP] No active Managers found matching target division "${targetManagerDivision}" with WA numbers for PR ${prId}`);
@@ -1983,22 +1979,18 @@ async function notifyNewPRTelegram(prId: string, data: any) {
     };
 
     const prDivision = String(data.division || "").toUpperCase().trim();
-    let targetManagerDivision = "";
-    if (prDivision.includes("CIRACAS") || prDivision === "GDC") {
-      targetManagerDivision = "TOKO";
-    } else if (prDivision.includes("PONCOL") || prDivision.includes("NAGOYA") || prDivision === "GDP" || prDivision === "GDN") {
-      targetManagerDivision = "GUDANG";
-    }
-
     let recipients = users.filter(u => u.telegramChatId && isManagerOnly(u.role));
     
-    if (targetManagerDivision) {
-      recipients = recipients.filter(u => {
-        const uDiv = String(u.division || "").toUpperCase().trim();
-        const uDivCode = String(u.divisionCode || "").toUpperCase().trim();
-        return uDiv.includes(targetManagerDivision) || uDivCode.includes(targetManagerDivision);
-      });
-    }
+    recipients = recipients.filter(u => {
+      const uDivRaw = String(u.division || "").trim().toUpperCase();
+      if (uDivRaw === "" || uDivRaw === "*" || uDivRaw === "ALL") return true;
+
+      const uDivs = uDivRaw.split(',').map(s => s.trim());
+      const uCodes = String(u.divisionCode || "").toUpperCase().split(',').map(s => s.trim());
+      
+      return uDivs.some(div => prDivision.includes(div) || div.includes(prDivision)) ||
+             uCodes.some(code => prDivision.includes(code) || code.includes(prDivision));
+    });
 
     if (recipients.length === 0) {
       console.log(`[TELEGRAM] No active Managers with Telegram Chat ID found for PR ${prId}`);
