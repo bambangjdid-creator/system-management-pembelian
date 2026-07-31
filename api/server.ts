@@ -1572,7 +1572,7 @@ function getAppUrl(req?: any) {
   if (APP_BASE_URL) return APP_BASE_URL;
 
   const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
-  const proto = forwardedProto || req?.protocol || (isProduction ? "https" : "http");
+  const proto = isVercel ? "https" : (forwardedProto || req?.protocol || (isProduction ? "https" : "http"));
   const forwardedHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
   const host = forwardedHost || req?.headers?.host;
 
