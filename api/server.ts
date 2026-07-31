@@ -3303,14 +3303,17 @@ app.get("/api/telegram/setup-webhook", async (req, res) => {
     
     let targetUrl = TELEGRAM_WEBHOOK_URL;
     if (!targetUrl || targetUrl.includes("localhost") || targetUrl.includes("127.0.0.1")) {
-      targetUrl = `${getAppUrl(req)}/api/telegram/webhook`;
-    } else {
-      if (targetUrl.startsWith("http://")) {
-        targetUrl = targetUrl.replace("http://", "https://");
-      }
-      if (!targetUrl.endsWith("/api/telegram/webhook")) {
-        targetUrl = targetUrl.replace(/\/+$/, "") + "/api/telegram/webhook";
-      }
+      targetUrl = `${getAppUrl(req)}`;
+    }
+    
+    // Always append the webhook path if missing
+    if (!targetUrl.endsWith("/api/telegram/webhook")) {
+      targetUrl = targetUrl.replace(/\/+$/, "") + "/api/telegram/webhook";
+    }
+
+    // Unconditionally force HTTPS for any public URL
+    if (targetUrl.startsWith("http://") && !targetUrl.includes("localhost") && !targetUrl.includes("127.0.0.1")) {
+      targetUrl = targetUrl.replace("http://", "https://");
     }
 
     console.log(`[TELEGRAM] Registering webhook URL: ${targetUrl}`);
