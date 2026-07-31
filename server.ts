@@ -2981,7 +2981,7 @@ app.post(["/api/po", "/api/po/create"], requireRoles(["PURCHASE", "PURCHASING", 
 app.post("/api/po/receive", async (req, res) => {
   try {
     const auth = getAuthFromRequest(req);
-    const sessionUser = (req as any).user;
+    const sessionUser = (req as any).sessionUser as SessionUser | undefined;
     if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized." });
 
     const { prId, poNo, doNo, driverName, licensePlate, checkerBy, receivedDate } = req.body;
