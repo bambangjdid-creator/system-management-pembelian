@@ -111,6 +111,11 @@ export interface PurchaseOrder {
   grandTotal?: string | number;
   discountPercent?: string | number;
   taxPercent?: string | number;
+  doNo?: string;
+  driverName?: string;
+  licensePlate?: string;
+  receivedDate?: string;
+  checkerBy?: string;
 }
 
 export const WAREHOUSE_ADDRESS_INFO: Record<string, { name: string; address: string }> = {

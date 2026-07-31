@@ -682,6 +682,16 @@ export default function App() {
                 <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Tanggal Kirim:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.deliveryDate || '-'}</span></p>
                 <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Pembuat PO:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.purchaseName || '-'}</span></p>
                 <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Catatan:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.notes || '-'}</span></p>
+                {previewPo.status === 'ALREADY RECEIVE' && (
+                  <div className="mt-3 pt-3 border-t border-slate-200/60 space-y-1.5">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-emerald-600 mb-1">✓ Informasi Penerimaan Gudang</p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">No. DO / Surat Jalan:</span><span className="font-bold text-emerald-700">{previewPo.doNo || '-'}</span></p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Nama Supir:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.driverName || '-'}</span></p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Nomor Polisi:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.licensePlate || '-'}</span></p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Tanggal Diterima:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.receivedDate || '-'}</span></p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Checker By:</span><span className="font-bold text-emerald-700">{previewPo.checkerBy || '-'}</span></p>
+                  </div>
+                )}
               </div>
             )}
           />

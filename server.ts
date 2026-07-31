@@ -2371,6 +2371,11 @@ type PoHeaderRow = {
   discountPercent: any;
   taxPercent: any;
   subTotal: any;
+  doNo: string;
+  driverName: string;
+  licensePlate: string;
+  receivedDate: string;
+  checkerBy: string;
 };
 
 type PoDetailRow = {
@@ -2438,6 +2443,11 @@ function mapPoHeader(row: any[], index: number): PoHeaderRow {
     taxPercent: row[14] ?? "",
     others: row[15] ?? "",
     grandTotal: row[16] ?? "",
+    doNo: safeText(row[17]),
+    driverName: safeText(row[18]),
+    licensePlate: safeText(row[19]),
+    receivedDate: safeText(row[20]),
+    checkerBy: safeText(row[21]),
   };
 }
 
@@ -2467,7 +2477,7 @@ async function loadPrHeaderDetail(auth: any) {
 
 async function loadPoHeaderDetail(auth: any) {
   const [headerRows, detailRows] = await Promise.all([
-    sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:Q`),
+    sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:V`),
     sheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!A2:G`),
   ]);
   const headers = headerRows.map(mapPoHeader).filter((h: PoHeaderRow) => h.poNo);
@@ -2531,6 +2541,11 @@ function toPoApiRow(detail: PoDetailRow, header: PoHeaderRow) {
     grandTotal: header.grandTotal,
     discountPercent: header.discountPercent,
     taxPercent: header.taxPercent,
+    doNo: header.doNo,
+    driverName: header.driverName,
+    licensePlate: header.licensePlate,
+    receivedDate: header.receivedDate,
+    checkerBy: header.checkerBy,
   };
 }
 
@@ -2581,7 +2596,7 @@ async function findPrHeader(auth: any, prId: string) {
 }
 
 async function findPoHeader(auth: any, poNo: string) {
-  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:Q`);
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:V`);
   for (let i = 0; i < rows.length; i++) {
     const header = mapPoHeader(rows[i], i);
     if (header.poNo === poNo) return header;
@@ -2960,6 +2975,70 @@ app.post(["/api/po", "/api/po/create"], requireRoles(["PURCHASE", "PURCHASING", 
     res.json({ success: true, poNo, pdfLink: poPdfUrl });
   } catch (error: any) {
     handleApiError(res, error, "PO_CREATE_NORMALIZED");
+  }
+});
+
+app.post("/api/po/receive", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const sessionUser = (req as any).user;
+    if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized." });
+
+    const { prId, poNo, doNo, driverName, licensePlate, checkerBy, receivedDate } = req.body;
+    if (!poNo || !doNo || !driverName || !licensePlate || !checkerBy || !receivedDate) {
+      return res.status(400).json({ success: false, message: "Semua data penerimaan wajib diisi." });
+    }
+
+    const poHeader = await findPoHeader(auth, poNo);
+    if (!poHeader) {
+      return res.status(404).json({ success: false, message: "Purchase Order tidak ditemukan." });
+    }
+
+    if (poHeader.status === "ALREADY RECEIVE") {
+      return res.status(400).json({ success: false, message: "PO ini sudah diterima sebelumnya." });
+    }
+
+    // Check division permission (Gudang matching)
+    const userRole = String(sessionUser.role || "").toUpperCase();
+    const isPowerUser = ["ADMIN", "PURCHASE", "PURCHASING"].includes(userRole);
+    if (!isPowerUser) {
+      const userDiv = String(sessionUser.division || "").toUpperCase().trim();
+      const poDiv = String(poHeader.division || "").toUpperCase().trim();
+      if (!userDiv || (!poDiv.includes(userDiv) && !userDiv.includes(poDiv))) {
+        return res.status(403).json({ success: false, message: "Anda tidak memiliki hak akses untuk menerima barang di divisi ini." });
+      }
+    }
+
+    // Format receivedDate (YYYY-MM-DD -> DD/MM/YYYY)
+    let formattedDate = "";
+    const dateParts = receivedDate.split("-");
+    if (dateParts.length === 3) {
+      formattedDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+    } else {
+      formattedDate = receivedDate;
+    }
+
+    // Update PO status to "ALREADY RECEIVE" (Column J)
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!J${poHeader.rowIndex}`, [["ALREADY RECEIVE"]]);
+
+    // Update Columns R to V: DO_NO, DRIVER_NAME, LICENSE_PLATE, RECEIVED_DATE, CHEKER_BY
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!R${poHeader.rowIndex}:V${poHeader.rowIndex}`, [[
+      doNo,
+      driverName,
+      licensePlate,
+      formattedDate,
+      checkerBy
+    ]]);
+
+    // Update PR status to "ALREADY RECEIVE"
+    const targetPrId = prId || poHeader.prId;
+    if (targetPrId) {
+      await updatePrHeaderStatus(auth, targetPrId, "ALREADY RECEIVE");
+    }
+
+    res.json({ success: true, message: "Barang berhasil diterima dan status diperbarui." });
+  } catch (error: any) {
+    handleApiError(res, error, "PO_RECEIVE");
   }
 });
 
