@@ -16,9 +16,10 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 
 const isProduction = process.env.NODE_ENV === "production";
+const isVercel = process.env.VERCEL === "1";
 const PORT = Number(process.env.PORT || 3000);
-const PDF_DIR = path.join(process.cwd(), "PR_PDF");
-const PO_PDF_DIR = path.join(process.cwd(), "PO_PDF");
+const PDF_DIR = isVercel ? "/tmp/PR_PDF" : path.join(process.cwd(), "PR_PDF");
+const PO_PDF_DIR = isVercel ? "/tmp/PO_PDF" : path.join(process.cwd(), "PO_PDF");
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -654,8 +655,8 @@ async function createPrPdf(prId: string, data: any, auth: any): Promise<{ filePa
       
       const stream = fs.createWriteStream(filePath);
       driveStream.data.pipe(stream);
-      await new Promise((resolve, reject) => {
-        stream.on("finish", resolve);
+      await new Promise<void>((resolve, reject) => {
+        stream.on("finish", () => resolve());
         stream.on("error", reject);
       });
 
@@ -1065,8 +1066,8 @@ async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePa
       
       const stream = fs.createWriteStream(filePath);
       driveStream.data.pipe(stream);
-      await new Promise((resolve, reject) => {
-        stream.on("finish", resolve);
+      await new Promise<void>((resolve, reject) => {
+        stream.on("finish", () => resolve());
         stream.on("error", reject);
       });
 
@@ -1610,7 +1611,7 @@ async function notifyNewPR(prId: string, data: any, req?: any) {
     });
 
     if (recipients.length === 0) {
-      console.log(`[WHATSAPP] No active Managers found matching target division "${targetManagerDivision}" with WA numbers for PR ${prId}`);
+      console.log(`[WHATSAPP] No active Managers found matching target division "${prDivision}" with WA numbers for PR ${prId}`);
       return;
     }
 
@@ -3595,4 +3596,8 @@ async function startServer() {
     setupTelegram().catch(err => console.error("[TELEGRAM] Webhook setup failed:", err.message));
   });
 }
-startServer();
+if (process.env.VERCEL !== "1") {
+  startServer();
+}
+
+export default app;
