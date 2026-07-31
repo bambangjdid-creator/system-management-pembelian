@@ -1572,9 +1572,11 @@ function getAppUrl(req?: any) {
   if (APP_BASE_URL) return APP_BASE_URL;
 
   const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
-  const proto = isVercel ? "https" : (forwardedProto || req?.protocol || (isProduction ? "https" : "http"));
   const forwardedHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
-  const host = forwardedHost || req?.headers?.host;
+  const host = forwardedHost || req?.headers?.host || "";
+  
+  const isVercelEnv = process.env.VERCEL === "1" || !!process.env.NOW_REGION || host.includes("vercel.app");
+  const proto = isVercelEnv ? "https" : (forwardedProto || req?.protocol || (isProduction ? "https" : "http"));
 
   if (host) return `${proto}://${host}`;
   return `http://localhost:${PORT}`;
