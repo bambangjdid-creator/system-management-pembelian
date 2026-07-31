@@ -3300,7 +3300,19 @@ app.get("/api/telegram/setup-webhook", async (req, res) => {
     if (!TELEGRAM_BOT_TOKEN) {
       return res.status(400).json({ success: false, message: "TELEGRAM_BOT_TOKEN is not configured in environment variables." });
     }
-    const targetUrl = TELEGRAM_WEBHOOK_URL || `${getAppUrl(req)}/api/telegram/webhook`;
+    
+    let targetUrl = TELEGRAM_WEBHOOK_URL;
+    if (!targetUrl || targetUrl.includes("localhost") || targetUrl.includes("127.0.0.1")) {
+      targetUrl = `${getAppUrl(req)}/api/telegram/webhook`;
+    } else {
+      if (targetUrl.startsWith("http://")) {
+        targetUrl = targetUrl.replace("http://", "https://");
+      }
+      if (!targetUrl.endsWith("/api/telegram/webhook")) {
+        targetUrl = targetUrl.replace(/\/+$/, "") + "/api/telegram/webhook";
+      }
+    }
+
     console.log(`[TELEGRAM] Registering webhook URL: ${targetUrl}`);
     const response = await sendTelegramRequest("setWebhook", { url: targetUrl });
     if (response && response.ok) {
