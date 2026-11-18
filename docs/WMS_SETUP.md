@@ -233,3 +233,114 @@ Body: `{ csv, warehouseId, trxDate?, refNo? }`.
   pencocokan lewat nama, gudang tak dikenal, qty negatif
 
 Jalankan: `npm run test:run`
+
+---
+
+# 10. Form Terima Barang + pencatatan stok otomatis
+
+Fase 1 no. 1.3–1.4. Berlaku pada `POST /api/po/receive` dan
+`src/features/receive/ReceiveForm.tsx`.
+
+## Yang berubah di form
+
+| Sebelum | Sesudah |
+|---|---|
+| Satuan terkunci mengikuti PO | **Satuan bisa dipilih** (DUS/PCS/BAL) sesuai `UNIT_CONVERSION` |
+| Qty terima saja | Qty terima **+ pratinjau konversi** ("3 DUS = 60 PCS") |
+| Tidak ada batch | **Batch + tanggal expired**, bisa lebih dari satu |
+| Tidak menyentuh stok | **Menulis `STOCK_LEDGER`, `STOCK_BATCH`, `PRICE_HISTORY`** |
+
+Satuan default diambil dari satuan PO bila punya konversi; kalau tidak, satuan dasar item.
+
+## Pencocokan item PO ke WMS
+
+PO/PR menyimpan **nama barang**, sedangkan WMS bekerja dengan `ITEM_ID`. Pencocokan
+dilakukan di server saat form dibuka, berurutan:
+
+1. **`ITEM_ID`** persis (`ITM-004945`)
+2. **`IPOS_CODE`** persis (`A591-K`)
+3. **Nama** yang dinormalkan — huruf besar, spasi dan tanda baca dibuang
+   (`511  bravo (25 kg)` cocok dengan `511 BRAVO (25 KG)`)
+
+Bila nama dipakai lebih dari satu item, dianggap **tidak cocok** — lebih baik tidak
+mencatat daripada mencatat ke barang yang salah.
+
+Item yang tidak cocok **tidak memblokir penerimaan**. Barang fisik tetap diterima dan
+Berita Acara tetap terbit, tetapi:
+
+- stoknya tidak bertambah di WMS
+- muncul peringatan kuning di form sebelum disimpan
+- namanya disebut di respons `wms.skipped` dan di layar sukses
+
+## Validasi (berjalan sebelum apa pun ditulis)
+
+| Aturan | Pesan bila dilanggar |
+|---|---|
+| Satuan harus punya konversi | `Satuan "SAK" tidak punya konversi untuk "A591-K". Pilihan: PCS, DUS.` |
+| Item `TRACK_EXPIRY=Y` wajib tanggal expired | `Tanggal expired wajib diisi untuk ...` |
+| Tanggal harus nyata (bukan 2027-02-30) | `Tanggal expired "..." tidak valid` |
+| Total qty per batch = qty terima | `Total qty batch (2) tidak sama dengan Qty Terima (3)` |
+| Qty batch > 0 | `Qty batch harus lebih dari 0` |
+
+Urutannya disengaja: **validasi dulu → baru tulis**. Baris 4366 vs 4496 pada
+`api/server.ts`. Jadi tidak mungkin ada PO berstatus `ALREADY RECEIVE` dengan ledger
+setengah jadi.
+
+## Yang ditulis ke spreadsheet WMS
+
+Contoh: PO 3 DUS A591-K (1 DUS = 20 PCS, expired 2027-05-31), gudang Nagoya.
+
+`STOCK_LEDGER` — satu baris per item:
+
+| Kolom | Nilai |
+|---|---|
+| `LEDGER_ID` | `GR-GR-NGY000000005-26-001` |
+| `TRX_TYPE` | `RECEIVE` |
+| `REF_NO` | nomor GR |
+| `WAREHOUSE_ID` | `WH-NAG` |
+| `QTY_IN` / `TRX_UNIT` | `3` / `DUS` |
+| `TO_UNIT_QTY` | `20` |
+| `QTY_BASE` | **`60`** |
+| `UNIT_COST` | harga PO ÷ 20 |
+
+`STOCK_BATCH` — satu baris per batch, dengan `EXPIRED_DATE` dan `QTY_REMAIN_BASE` = 60.
+
+`PRICE_HISTORY` — `PRICE_TYPE=BUY`, harga dalam satuan transaksi, `SOURCE=PO`.
+
+## Bila penulisan WMS gagal
+
+Penerimaan **tidak dibatalkan** — barang fisik sudah diterima dan Berita Acara sudah
+terbit. Kegagalan dilaporkan jujur ke pengguna:
+
+> Stok gudang BELUM tercatat di WMS: &lt;pesan error&gt;. Catat manual atau hubungi admin.
+
+Alasan: membatalkan penerimaan karena Google Sheets bermasalah akan membuat staf gudang
+kehilangan pekerjaan yang sudah dilakukan. Lebih baik dicatat sebagai utang kerja.
+
+## Pemetaan divisi ke gudang
+
+| Divisi di PO | `WAREHOUSE_ID` |
+|---|---|
+| `GD NAGOYA`, `NGY` | `WH-NAG` |
+| `GD PONCOL`, `PCL` | `WH-PON` |
+| `GD CIRACAS` | `WH-CIR` |
+| lainnya | kode divisi apa adanya |
+
+## Multi-batch
+
+Default **satu baris = satu batch**, dengan tombol **Tambah Batch** bila satu kedatangan
+punya dua tanggal expired berbeda. Qty batch harus berjumlah sama dengan qty terima —
+kalau tidak, tombol simpan ditolak.
+
+Keputusan "satu PO boleh berapa batch" tidak perlu diambil sekarang; form sudah fleksibel
+untuk keduanya.
+
+## Test
+
+`71 test` di 10 file. Yang baru:
+
+- `api/__tests__/wms-receive.test.ts` — pemetaan gudang, normalisasi tanggal
+  (`31/05/2027` → `2027-05-31`), penolakan `2027-02-30`, pencocokan item
+  (ID / kode iPOSS / nama), daftar satuan yang sah
+- `src/features/receive/__tests__/receiveItemRow.test.ts` — 3 DUS = 60 PCS,
+  satuan dasar faktor 1, qty kosong = 0, qty desimal

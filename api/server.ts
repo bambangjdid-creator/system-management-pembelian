@@ -3345,6 +3345,176 @@ function mapWmsItem(row: Record<string, string>): WmsItem {
 let wmsItemCache: { at: number; items: WmsItem[] } | null = null;
 const WMS_CACHE_MS = 5 * 60 * 1000;
 
+// --- Pemetaan divisi/PO -> WAREHOUSE_ID di WMS -------------------------------
+// Divisi di PO memakai nama seperti "GD NAGOYA" / "GUDANG CIRACAS".
+// Peta ini menyamakannya dengan WAREHOUSE_ID di tab WAREHOUSE.
+const WAREHOUSE_DIVISION_MAP: { pattern: RegExp; warehouseId: string }[] = [
+  { pattern: /NAGOYA|NGY/i, warehouseId: "WH-NAG" },
+  { pattern: /PONCOL|PCL/i, warehouseId: "WH-PON" },
+  { pattern: /CIRACAS|CIR/i, warehouseId: "WH-CIR" },
+];
+
+function resolveWarehouseId(division: unknown): string {
+  const raw = safeText(division);
+  if (!raw) return "";
+  for (const entry of WAREHOUSE_DIVISION_MAP) {
+    if (entry.pattern.test(raw)) return entry.warehouseId;
+  }
+  // Tidak dikenal: pakai kode divisi apa adanya agar tetap bisa dilacak.
+  return cleanCode(raw, "");
+}
+
+// --- Helper tanggal untuk input batch/expired -------------------------------
+// Menerima "2027-05-31", "31/05/2027", atau "31-05-2027" -> "2027-05-31".
+function normalizeDateInput(value: unknown): string {
+  const raw = safeText(value);
+  if (!raw) return "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (iso) return raw;
+  const dmy = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(raw);
+  if (dmy) {
+    const [, d, m, y] = dmy;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return raw;
+}
+
+function isValidIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [, y, m, d] = match;
+  const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+  return (
+    date.getUTCFullYear() === Number(y) &&
+    date.getUTCMonth() === Number(m) - 1 &&
+    date.getUTCDate() === Number(d)
+  );
+}
+
+// --- Pencocokan item PO -> item WMS -----------------------------------------
+// PO/PR menyimpan NAMA barang (belum tentu ada di ITEM_MASTER), sedangkan WMS
+// bekerja dengan ITEM_ID. Pencocokan dilakukan sekali di server saat form terima
+// dibuka, lalu dikirim ke frontend bersama daftar satuan yang bisa dipakai.
+
+type WmsMatchConfidence = "ID" | "IPOS_CODE" | "EXACT_NAME" | "NONE";
+
+type ReceiveItemWms = {
+  matched: boolean;
+  confidence: WmsMatchConfidence;
+  itemId: string;
+  itemName: string;
+  unitBase: string;
+  buyUnitDefault: string;
+  trackExpiry: boolean;
+  shelfLifeDays: number;
+  // Satuan yang boleh dipakai saat terima: satuan dasar + semua dari UNIT_CONVERSION
+  allowedUnits: { unit: string; toUnitQty: number; isBase: boolean }[];
+};
+
+const wmsNameIndexCache: { at: number; index: Map<string, WmsItem[]> } = {
+  at: 0,
+  index: new Map(),
+};
+
+function buildWmsNameIndex(items: WmsItem[]): Map<string, WmsItem[]> {
+  if (wmsNameIndexCache.at && Date.now() - wmsNameIndexCache.at < WMS_CACHE_MS) {
+    return wmsNameIndexCache.index;
+  }
+  const index = new Map<string, WmsItem[]>();
+  for (const item of items) {
+    for (const key of [item.itemName, item.iposCode]) {
+      const normalized = normalizeItemKey(key);
+      if (!normalized) continue;
+      const list = index.get(normalized) || [];
+      if (!list.includes(item)) list.push(item);
+      index.set(normalized, list);
+    }
+  }
+  wmsNameIndexCache.at = Date.now();
+  wmsNameIndexCache.index = index;
+  return index;
+}
+
+// Cari satu item WMS dari nama/kode yang dipakai di PO.
+function matchWmsItem(
+  nameOrCode: string,
+  items: WmsItem[],
+  nameIndex: Map<string, WmsItem[]>
+): { item: WmsItem | null; confidence: WmsMatchConfidence } {
+  const raw = safeText(nameOrCode);
+  if (!raw) return { item: null, confidence: "NONE" };
+
+  const upper = raw.toUpperCase();
+  const byId = items.find((i) => i.itemId.toUpperCase() === upper);
+  if (byId) return { item: byId, confidence: "ID" };
+
+  const byIpos = items.find((i) => i.iposCode && i.iposCode.toUpperCase() === upper);
+  if (byIpos) return { item: byIpos, confidence: "IPOS_CODE" };
+
+  const hits = nameIndex.get(normalizeItemKey(raw)) || [];
+  if (hits.length === 1) return { item: hits[0], confidence: "EXACT_NAME" };
+
+  return { item: null, confidence: "NONE" };
+}
+
+// Daftar satuan yang sah untuk satu item: satuan dasar (faktor 1) + konversi aktif.
+function buildAllowedUnits(
+  item: WmsItem | null,
+  conversions: { fromUnit: string; toUnit: string; toUnitQty: number }[]
+): { unit: string; toUnitQty: number; isBase: boolean }[] {
+  if (!item) return [];
+  const units = [{ unit: item.unitBase, toUnitQty: 1, isBase: true }];
+  const seen = new Set([item.unitBase.toUpperCase()]);
+  for (const conv of conversions) {
+    const key = conv.fromUnit.toUpperCase();
+    if (seen.has(key)) continue;
+    if (!conv.fromUnit || !conv.toUnitQty) continue;
+    seen.add(key);
+    units.push({ unit: conv.fromUnit, toUnitQty: conv.toUnitQty, isBase: false });
+  }
+  return units;
+}
+
+// Susun info WMS untuk semua baris PO. Konversi dibaca sekali per request.
+async function resolveWmsForPoItems(
+  auth: any,
+  poItems: { itemName: string; unit: string }[]
+): Promise<Map<string, ReceiveItemWms>> {
+  const result = new Map<string, ReceiveItemWms>();
+  if (!WMS_SPREADSHEET_ID) return result;
+
+  try {
+    const [items, conversions] = await Promise.all([
+      loadWmsItems(auth),
+      loadWmsConversions(auth),
+    ]);
+    const nameIndex = buildWmsNameIndex(items);
+
+    for (const poItem of poItems) {
+      const key = `${safeText(poItem.itemName).toUpperCase()}|${safeText(poItem.unit).toUpperCase()}`;
+      if (result.has(key)) continue;
+
+      const { item, confidence } = matchWmsItem(poItem.itemName, items, nameIndex);
+      const conv = item ? conversions.get(item.itemId.toUpperCase()) || [] : [];
+      result.set(key, {
+        matched: Boolean(item),
+        confidence,
+        itemId: item?.itemId || "",
+        itemName: item?.itemName || "",
+        unitBase: item?.unitBase || "",
+        buyUnitDefault: item?.buyUnitDefault || "",
+        trackExpiry: item?.trackExpiry || false,
+        shelfLifeDays: item?.shelfLifeDays || 0,
+        allowedUnits: buildAllowedUnits(item, conv),
+      });
+    }
+  } catch (error: any) {
+    // WMS belum siap tidak boleh memblokir penerimaan barang fisik.
+    console.warn(`[WMS] Pencocokan item PO dilewati: ${error.message}`);
+  }
+  return result;
+}
+
 async function loadWmsItems(auth: any, force = false): Promise<WmsItem[]> {
   if (!force && wmsItemCache && Date.now() - wmsItemCache.at < WMS_CACHE_MS) {
     return wmsItemCache.items;
@@ -4083,6 +4253,10 @@ app.get("/api/po/receive/:poNo", async (req, res) => {
     const divCode = resolveDivisionCode(poHeader.division, sessionUser.divisionCode);
     const suggestedGrNo = poHeader.grNo || (await nextGrNumber(auth, divCode, yearSuffix));
 
+    // Info WMS per item (satuan yang boleh dipakai, wajib expired atau tidak).
+    // Bila spreadsheet WMS belum siap, peta ini kosong dan form tetap jalan.
+    const wmsMap = await resolveWmsForPoItems(auth, details);
+
     res.json({
       success: true,
       po: {
@@ -4098,16 +4272,21 @@ app.get("/api/po/receive/:poNo", async (req, res) => {
         grNo: poHeader.grNo,
         suggestedGrNo,
       },
-      items: details.map((d) => ({
-        podId: d.detailId,
-        rowIndex: d.rowIndex,
-        itemName: d.itemName,
-        unit: d.unit,
-        qty: d.qty,
-        price: d.price,
-        qtyTerima: d.qtyTerima,
-        keterangan: d.keterangan,
-      })),
+      wmsEnabled: Boolean(WMS_SPREADSHEET_ID),
+      items: details.map((d) => {
+        const key = `${safeText(d.itemName).toUpperCase()}|${safeText(d.unit).toUpperCase()}`;
+        return {
+          podId: d.detailId,
+          rowIndex: d.rowIndex,
+          itemName: d.itemName,
+          unit: d.unit,
+          qty: d.qty,
+          price: d.price,
+          qtyTerima: d.qtyTerima,
+          keterangan: d.keterangan,
+          wms: wmsMap.get(key) || null,
+        };
+      }),
     });
   } catch (error: any) {
     handleApiError(res, error, "PO_RECEIVE_GET");
@@ -4182,6 +4361,120 @@ app.post("/api/po/receive", async (req, res) => {
         });
       }
       normalizedItems.push({ detail, qtyTerima, keterangan });
+    }
+
+    // --- Validasi WMS: satuan, konversi, batch & expired ---------------------
+    // Dijalankan SEBELUM apa pun ditulis ke spreadsheet, supaya tidak pernah ada
+    // PO berstatus "ALREADY RECEIVE" dengan baris ledger yang tidak lengkap.
+    type WmsLedgerRow = {
+      itemId: string;
+      itemName: string;
+      unit: string;
+      toUnitQty: number;
+      qtyBase: number;
+      unitCost: number;
+      batches: { batchNo: string; expiredDate: string; qty: number; qtyBase: number }[];
+    };
+    const wmsLedgerRows: WmsLedgerRow[] = [];
+    let wmsNotes: string[] = [];
+    let wmsSkipped: string[] = [];
+
+    const inbound = normalizedItems.filter((row) => asNumber(row.qtyTerima) > 0);
+    if (WMS_SPREADSHEET_ID && inbound.length) {
+      const wmsMap = await resolveWmsForPoItems(auth, inbound.map((r) => r.detail));
+
+      for (const row of inbound) {
+        const { detail, qtyTerima } = row;
+        const key = `${safeText(detail.itemName).toUpperCase()}|${safeText(detail.unit).toUpperCase()}`;
+        const info = wmsMap.get(key);
+        const input = safeItems.find(
+          (it: any) => safeText(it.podId || it.detailId) === safeText(detail.detailId)
+        ) || {};
+
+        // Item yang belum ada di ITEM_MASTER tidak memblokir penerimaan fisik.
+        // Dicatat di respons supaya bisa dilengkapi di Master Data.
+        if (!info || !info.matched) {
+          wmsSkipped.push(detail.itemName);
+          continue;
+        }
+
+        const unitInput = safeText(input.unitTerima).toUpperCase();
+        const unitTerima = unitInput || detail.unit || info.unitBase;
+        const allowed = info.allowedUnits.find(
+          (u) => u.unit.toUpperCase() === unitTerima.toUpperCase()
+        );
+        if (!allowed) {
+          return res.status(400).json({
+            success: false,
+            message: `Satuan "${unitTerima}" tidak punya konversi untuk "${detail.itemName}". Pilihan: ${info.allowedUnits.map((u) => u.unit).join(", ")}.`,
+          });
+        }
+
+        const qtyBase = asNumber(qtyTerima) * allowed.toUnitQty;
+
+        // Batch & expired hanya diwajibkan untuk item TRACK_EXPIRY=Y.
+        const rawBatches: any[] = Array.isArray(input.batches) && input.batches.length
+          ? input.batches
+          : [{ batchNo: input.batchNo, expiredDate: input.expiredDate, qty: qtyTerima }];
+
+        const batches: WmsLedgerRow["batches"] = [];
+        if (info.trackExpiry) {
+          for (const batch of rawBatches) {
+            const batchNo = safeText(batch.batchNo);
+            const expiredDate = normalizeDateInput(batch.expiredDate);
+            if (!expiredDate) {
+              return res.status(400).json({
+                success: false,
+                message: `Tanggal expired wajib diisi untuk "${detail.itemName}" (item ini dilacak masa simpannya).`,
+              });
+            }
+            if (!isValidIsoDate(expiredDate)) {
+              return res.status(400).json({
+                success: false,
+                message: `Tanggal expired "${expiredDate}" tidak valid untuk "${detail.itemName}". Gunakan format YYYY-MM-DD.`,
+              });
+            }
+            const batchQty = asNumber(batch.qty ?? qtyTerima);
+            if (batchQty <= 0) {
+              return res.status(400).json({
+                success: false,
+                message: `Qty batch harus lebih dari 0 untuk "${detail.itemName}".`,
+              });
+            }
+            batches.push({
+              batchNo,
+              expiredDate,
+              qty: batchQty,
+              qtyBase: batchQty * allowed.toUnitQty,
+            });
+          }
+          const totalBatch = batches.reduce((sum, b) => sum + b.qty, 0);
+          if (Math.abs(totalBatch - asNumber(qtyTerima)) > 0.0001) {
+            return res.status(400).json({
+              success: false,
+              message: `Total qty per batch (${totalBatch}) tidak sama dengan Qty Terima (${qtyTerima}) untuk "${detail.itemName}".`,
+            });
+          }
+        } else if (rawBatches[0] && normalizeDateInput(rawBatches[0].expiredDate)) {
+          // Item tanpa kewajiban expired tetap boleh dicatat bila tanggalnya ada.
+          batches.push({
+            batchNo: safeText(rawBatches[0].batchNo),
+            expiredDate: normalizeDateInput(rawBatches[0].expiredDate),
+            qty: asNumber(qtyTerima),
+            qtyBase,
+          });
+        }
+
+        wmsLedgerRows.push({
+          itemId: info.itemId,
+          itemName: info.itemName || detail.itemName,
+          unit: unitTerima,
+          toUnitQty: allowed.toUnitQty,
+          qtyBase,
+          unitCost: asNumber(detail.price) / (allowed.toUnitQty || 1),
+          batches,
+        });
+      }
     }
 
     // --- Generate GR number (server-side, per division) ---
@@ -4285,12 +4578,137 @@ app.post("/api/po/receive", async (req, res) => {
       await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!Y${poHeader.rowIndex}`, [[grPdfLink]]);
     }
 
+    // --- Tulis ke WMS: ledger, batch, riwayat harga --------------------------
+    // Append-only. Kegagalan di sini TIDAK membatalkan penerimaan (barang fisik
+    // sudah diterima), tetapi dilaporkan ke pengguna agar bisa ditindaklanjuti.
+    if (wmsLedgerRows.length) {
+      try {
+        const stamp = new Date().toISOString();
+        const warehouseId = resolveWarehouseId(poHeader.division);
+        const ledgerPrefix = `GR-${grNo}-`;
+
+        const ledgerValues: any[][] = [];
+        const batchValues: any[][] = [];
+        const priceValues: any[][] = [];
+        let seq = 0;
+
+        for (const row of wmsLedgerRows) {
+          seq += 1;
+          ledgerValues.push([
+            `${ledgerPrefix}${String(seq).padStart(3, "0")}`,
+            receivedDate,
+            "RECEIVE",
+            grNo,
+            row.itemId,
+            row.itemName,
+            warehouseId,
+            row.batches[0] ? `${grNo}-B1` : "",
+            row.qtyBase / (row.toUnitQty || 1), // QTY_IN dalam satuan transaksi
+            0, // QTY_OUT
+            row.unit,
+            row.toUnitQty,
+            row.qtyBase,
+            row.unitCost,
+            Math.round(row.unitCost * row.qtyBase),
+            poHeader.division || "",
+            checkerBy,
+            `Terima PO ${poNo} / DO ${doNo}`,
+            stamp,
+          ]);
+
+          row.batches.forEach((batch, idx) => {
+            const batchId = `${grNo}-B${idx + 1}`;
+            batchValues.push([
+              batchId,
+              row.itemId,
+              row.itemName,
+              warehouseId,
+              batch.batchNo,
+              "", // PRODUCTION_DATE
+              batch.expiredDate,
+              batch.qtyBase,
+              batch.qtyBase,
+              row.unit,
+              row.unitCost,
+              poHeader.supplier || "",
+              grNo,
+              "ACTIVE",
+              stamp,
+            ]);
+          });
+
+          priceValues.push([
+            `PRC-${grNo}-${String(seq).padStart(3, "0")}`,
+            row.itemId,
+            row.itemName,
+            "BUY",
+            row.unitCost * (row.toUnitQty || 1),
+            row.unit,
+            "PO",
+            poNo,
+            poHeader.supplier || "",
+            receivedDate,
+            stamp,
+          ]);
+        }
+
+        const sheets = getSheets(auth);
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: requireWmsSpreadsheet(),
+          range: `${WMS_TABS.STOCK_LEDGER}!A2:S`,
+          valueInputOption: "USER_ENTERED",
+          insertDataOption: "INSERT_ROWS",
+          requestBody: { values: ledgerValues },
+        });
+
+        if (batchValues.length) {
+          await sheets.spreadsheets.values.append({
+            spreadsheetId: requireWmsSpreadsheet(),
+            range: `${WMS_TABS.STOCK_BATCH}!A2:O`,
+            valueInputOption: "USER_ENTERED",
+            insertDataOption: "INSERT_ROWS",
+            requestBody: { values: batchValues },
+          });
+        }
+
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: requireWmsSpreadsheet(),
+          range: `${WMS_TABS.PRICE_HISTORY}!A2:K`,
+          valueInputOption: "USER_ENTERED",
+          insertDataOption: "INSERT_ROWS",
+          requestBody: { values: priceValues },
+        });
+      } catch (wmsErr: any) {
+        console.warn(`[WMS] Gagal menulis ledger penerimaan: ${wmsErr.message}`);
+        wmsNotes.push(
+          `Stok gudang BELUM tercatat di WMS: ${wmsErr.message}. Catat manual atau hubungi admin.`
+        );
+      }
+    }
+
+    if (wmsSkipped.length) {
+      wmsNotes.push(
+        `Item belum ada di Master Data WMS sehingga stoknya tidak bertambah: ${wmsSkipped.join(", ")}.`
+      );
+    }
+
     // Update PR status to "ALREADY RECEIVE"
     if (targetPrId) {
       await updatePrHeaderStatus(auth, targetPrId, "ALREADY RECEIVE");
     }
 
-    res.json({ success: true, message: "Barang berhasil diterima dan status diperbarui.", grNo, grPdfLink });
+    res.json({
+      success: true,
+      message: "Barang berhasil diterima dan status diperbarui.",
+      grNo,
+      grPdfLink,
+      wms: {
+        written: wmsLedgerRows.length,
+        batches: wmsLedgerRows.reduce((sum, r) => sum + r.batches.length, 0),
+        skipped: wmsSkipped,
+        notes: wmsNotes,
+      },
+    });
   } catch (error: any) {
     handleApiError(res, error, "PO_RECEIVE");
   }
@@ -4935,6 +5353,11 @@ export {
   rowsToObjects,
   mapWmsItem,
   parseOpeningCsv,
+  resolveWarehouseId,
+  normalizeDateInput,
+  isValidIsoDate,
+  matchWmsItem,
+  buildAllowedUnits,
   // untuk diuji: butuh injeksi lookup konversi
   resolveOpeningRows,
   setOpeningConversionLookup,
