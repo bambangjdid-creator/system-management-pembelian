@@ -29,16 +29,16 @@ lapisan baru: **persediaan** (inventory). Perubahan terbesar bukan pada tampilan
 
 | Temuan | Angka | Implikasi |
 |---|---|---|
-| Item di `Master_Stock` | **3.875 baris** | Terlalu banyak untuk diopname manual tanpa barcode |
+| Item master (data iPOSS terbaru) | **8.789 baris** | Naik dari 3.875 karena ekspor iPOSS memuat semua item, termasuk nonaktif. Yang `Sale` = 3.895, yang punya stok > 0 = 2.174 |
 | Kategori | **80 kategori** | Perlu master kategori terpisah (sekarang teks bebas) |
 | Nama item duplikat | 8 nama / 16 baris | Perlu `ITEM_ID` sebagai kunci, bukan nama |
-| Header `Master_Stock` | A–D saja, padahal kolom E dan F berisi data (3.875 & 3.842 baris) | Header perlu dirapikan: E → `STOCK_QTY`, F → `BUY_PRICE` |
+| Kolom master stock | **19 kolom** sudah tersedia: `ID Barang`, Nama, Supplier, Kategori, Satuan, Stock Onhand, Harga Pokok, Harga Jual, Status Jual, Berat, P/L/T, Volume, Status Expired, Production/Expired Date, Minimum Stock | Master sudah jauh lebih siap dari perkiraan awal |
 | Kolom E (dikonfirmasi) | **Qty total seluruh gudang**, dalam satuan terkecil; 0 – 51.972 | Boleh dihapus setelah saldo awal pindah ke ledger (lihat §7 Langkah 3) |
 | Kolom F (dikonfirmasi) | **Harga beli**, acuan dari iPOSS; median 23.500 | Dipakai sebagai pembanding harga PO |
 | Satuan | PCS 3.166, SAK 166, SET 74, BAL 73, PAK 55, ROLL 17, RENC 17, kosong 251 | **Satuan di master = satuan terkecil.** Perlu tabel kemasan berjenjang |
-| Contoh nyata | `A591-K` — unit `PCS`, stok 2.146, harga 13.500. Pembelian datang dalam **DUS (1 DUS = 30 PCS)** | Membuktikan perlunya multi-satuan: beli DUS, simpan PCS, jual PCS |
-| Kode barang | Hanya 2 item memakai pola kode (`A591-K`, `A594-K`); 3.873 lain berupa nama | Perlu `IPOS_CODE` sebagai jembatan ke iPOSS, terpisah dari `ITEM_ID` |
-| Item yang perlu `TRACK_EXPIRY=Y` | **1.601 item (41%)** | Pakan, cat/dog food, obat, vaksin, jamu, DOC, hasil bumi, shampoo, desinfektan |
+| Contoh nyata | `A591-K` = `SPS004945`, unit `PCS`, stok 2.644, harga pokok 11.189, harga jual 15.500. **1 DUS = 20 PCS** (dari file konversi iPOSS) | Membuktikan perlunya multi-satuan: beli DUS, simpan PCS, jual PCS |
+| Kode barang | **`ID Barang` iPOSS tersedia**: `SPS000001`–`SPS008789`, unik tanpa duplikat | **`ITEM_ID` memakai ID iPOSS apa adanya.** Tidak perlu membuat `ITM-000001`, tidak perlu tabel pemetaan |
+| Item yang perlu `TRACK_EXPIRY=Y` | **2.220 item (25%)** | Pakan, cat/dog food, obat, vaksin, jamu, DOC, hasil bumi, shampoo, desinfektan. Kolom `Status Expired Date` di master masih kosong seluruhnya |
 | Item `TRACK_EXPIRY=N` | **2.274 item (59%)** | Mainan, sangkar, aksesoris pancing/burung, joran, kerodong, dll. |
 | Gudang aktif | GD NAGOYA, GD PONCOL, GD CIRACAS | Multi-lokasi → butuh transfer & stok per gudang |
 | `User_Role` | ~96 user, hanya ±13 yang ROLE/DIVISION/ACCESS lengkap | Perlu dirapikan sebelum fitur ber-approval |
@@ -109,7 +109,7 @@ ditampilkan `DD/MM/YYYY` tetap dipertahankan pada kolom yang sudah ada.
 
 | Kolom | Nama | Tipe | Wajib | Keterangan |
 |---|---|---|---|---|
-| A | `ITEM_ID` | teks | ya | Kunci utama, auto: `ITM-000001`. **Tidak berubah walau nama item diedit** |
+| A | `ITEM_ID` | teks | ya | Kunci utama = **`ID Barang` iPOSS** (`SPS000001`). Tidak dibuat ulang. **Tidak berubah walau nama item diedit** |
 | B | `ITEM_NAME` | teks | ya | Nama barang (boleh duplikat, kunci tetap ITEM_ID) |
 | C | `CATEGORY` | teks | ya | Diambil dari `CATEGORY_MASTER` |
 | D | `SUPPLIER` | teks | tidak | Supplier utama |
@@ -129,9 +129,9 @@ ditampilkan `DD/MM/YYYY` tetap dipertahankan pada kolom yang sudah ada.
 | R | `UPDATED_AT` | tanggal | ya | |
 
 > **Kenapa `UNIT_BASE` wajib satuan terkecil?** Bisnis melayani partai besar *dan* eceran PCS.
-> Contoh `A591-K`: dibeli dalam **DUS (30 PCS)**, dijual eceran **PCS**. Kalau stok disimpan
-> dalam DUS, penjualan 1 PCS tidak bisa dicatat tanpa angka desimal. Karena itu:
-> **beli dalam DUS → konversi → simpan 30 PCS → jual per PCS.**
+> Contoh `A591-K` (`SPS004945`): dibeli dalam **DUS**, di iPOSS **1 DUS = 20 PCS**, dijual eceran **PCS**.
+> Kalau stok disimpan dalam DUS, penjualan 1 PCS tidak bisa dicatat tanpa angka desimal. Karena itu:
+> **beli dalam DUS → konversi ke PCS → simpan 20 PCS per DUS → jual per PCS.**
 
 > `Master_Stock` lama **tidak dihapus**. Setelah migrasi, ia menjadi sumber `ITEM_MASTER`
 > dan tetap dipakai sebagai daftar pilihan di form PR (read-only).
@@ -146,43 +146,68 @@ ditampilkan `DD/MM/YYYY` tetap dipertahankan pada kolom yang sudah ada.
 | D | `SHELF_LIFE_DAYS` | *default* umur simpan per kategori |
 | E | `IS_ACTIVE` | |
 
-Manfaat: mempercepat pembuatan item baru (3.875 item, penambahan rutin), dan menjaga
+Manfaat: mempercepat pembuatan item baru (8.789 item, penambahan rutin), dan menjaga
 `TRACK_EXPIRY` konsisten — mis. semua `CAT FOOD WET KALENG` otomatis `Y` dengan shelf life 540 hari.
 
-### 2.3 `UNIT_CONVERSION` (baru — **berjenjang, ini yang paling kritis**)
+### 2.3 `UNIT_CONVERSION` (baru — **sudah dimigrasi dari iPOSS**)
 
-Mendukung rantai kemasan lebih dari 2 tingkat, mis.:
+Mendukung rantai kemasan lebih dari 2 tingkat. Rantai nyata dari data Anda:
 
 ```
-1 BAL  = 4 RENCENG = 4 × 10 = 40 PCS
-1 DUS  = 30 PCS
-1 SAK  = 25 KG (bila satuan terkecil KG, bukan PCS)
+1 DUS   = 20 PCS            (A591-K / SPS004945)
+1 LUSIN = 12 PCS            (DC) A711- NIROX -1,5 L (ISI 24)
+1 DUS   = 24 PCS            -> DUS dan LUSIN dua jalur terpisah ke PCS
+1 PAK   = 50 PCS            (DC) DIAMOND LIGHT STICK ISI 5
+1 DUS   = 5.000 PCS         (1 DUS = 100 PAK)
+1 STRIP = 8 TBLT            (DC) DRONTAL CAT (ISI 40)
+1 DUS   = 40 TBLT
 ```
 
-| Kolom | Nama | Tipe | Keterangan |
+| Kolom | Nama | Keterangan |
+|---|---|---|
+| A | `CONV_ID` | `CNV-000001` |
+| B | `ITEM_ID` | `SPS000001` |
+| C | `ITEM_NAME` | hanya untuk pembacaan manusia |
+| D | `LEVEL` | urutan tampil (2, 3, 4 …); `UNIT_BASE` sendiri tidak ditulis |
+| E | `FROM_UNIT` | satuan transaksi, mis. `DUS` |
+| F | `TO_UNIT` | **selalu `UNIT_BASE`** item tersebut |
+| G | `TO_UNIT_QTY` | 1 `FROM_UNIT` = berapa `TO_UNIT` |
+| H | `IS_ACTIVE` | `Y`/`N` |
+| I | `NOTES` | diisi bila ada hal yang perlu dicek |
+
+**Semua konversi langsung ke `UNIT_BASE`** (bukan bertingkat di tabel) supaya perhitungan
+stok hanya satu langkah: `QTY_BASE = QTY × TO_UNIT_QTY`. Rantai bertingkat tetap benar karena
+setiap tingkat sudah dihitung ke satuan dasar — contoh `DIAMOND LIGHT STICK`: `1 PAK = 50 PCS`
+dan `1 DUS = 5.000 PCS`; keduanya valid tanpa perlu konversi DUS→PAK→PCS saat transaksi.
+
+**Temuan penting: awalan `@` di iPOSS bukan satuan fisik.**
+
+Dari 23.661 baris file konversi iPOSS, **12.119 baris memakai `@3`, `@6`, `@12`, `@5 SAK`** dan
+sejenisnya. Itu **tier harga jual**, bukan satuan gudang. Contoh `A591-K`:
+
+| Satuan iPOSS | Qty/ | Paket | Arti sebenarnya |
 |---|---|---|---|
-| A | `CONV_ID` | teks | `CNV-000001` |
-| B | `ITEM_ID` | teks | Kosong bila berlaku per kategori (pakai `CATEGORY_ID`) |
-| C | `CATEGORY_ID` | teks | dipakai bila konversi sama untuk semua item di kategori |
-| D | `FROM_UNIT` | teks | satuan besar, mis. `BAL` |
-| E | `TO_UNIT` | teks | satuan tujuan, mis. `RENCENG` |
-| F | `TO_UNIT_QTY` | angka | mis. `4` (1 BAL = 4 RENCENG) |
-| G | `LEVEL` | angka | 1 = paling atas (BAL), 2 = RENCENG, 3 = PCS. Urutan konversi |
-| H | `IS_ACTIVE` | `Y`/`N` | |
-| I | `NOTES` | teks | |
+| PCS | 1 | PCS | satuan dasar |
+| `@5` | 5 | PCS | beli 5 PCS (tier harga) |
+| `@10` | 10 | PCS | beli 10 PCS (tier harga) |
+| DUS | 20 | PCS | **1 DUS = 20 PCS — ini satuan fisik** |
 
-**Cara hitung:** konversi dilakukan **bertingkat** sampai mencapai `UNIT_BASE`. Contoh:
-beli 3 BAL → BAL→RENCENG (×4) → RENCENG→PCS (×10) → **3 × 4 × 10 = 120 PCS** masuk ke ledger.
+Jadi yang masuk `UNIT_CONVERSION` hanya **2.800 baris dari 2.591 item**; 12.119 baris tier harga
+tidak dimasukkan (kalau dimasukkan, tabel konversi jadi 5× lebih besar tanpa manfaat).
+
+**Bukti kebenaran rumus:** di file iPOSS, `stok(satuan) × Qty/` selalu = `stok(satuan dasar)`.
+Saya uji ke **2.760 baris — cocok semua, 0 selisih**. Artinya pemetaan ini bukan tebakan.
 
 **Aturan validasi:**
-- Setiap item yang punya >1 satuan **wajib** punya rantai konversi lengkap sampai `UNIT_BASE`.
-- Item tanpa konversi → hanya boleh transaksi dalam `UNIT_BASE`.
-- Konversi **tidak boleh** diubah bila sudah ada transaksi; buat versi baru (`IS_ACTIVE=N` pada yang lama).
+- Item yang punya satuan besar **wajib** punya baris konversi; item tanpa konversi hanya boleh
+  transaksi dalam `UNIT_BASE`.
+- Konversi **tidak boleh** diubah bila sudah ada transaksi; buat baris baru, set yang lama `N`.
 
-**Cakupan awal:** 405 item bersatuan BAL/SAK/PAK/SET/RENC + item yang dibeli dalam DUS
-seperti `A591-K`. Total perkiraan ±500 item perlu diisi — sisanya (PCS) tidak perlu konversi.
+**Cakupan hasil migrasi:** 2.730 item punya satuan besar (DUS/SAK/BAL/PAK/KARTON/LUSIN/KODI/RENC),
+2.591 di antaranya sudah punya rantai konversi dari iPOSS, 166 item punya 2 tingkat.
+Sisa 139 item perlu dilengkapi manual — terdaftar di `ITEM_MASTER_PERLU_CEK.csv`.
 
-> **Kolom `QTY_TERIMA` di form GR tetap dalam satuan transaksi (DUS), sedangkan
+> **`QTY_TERIMA` di form GR tetap dalam satuan transaksi (DUS), sedangkan
 > `STOCK_LEDGER.QTY_BASE` berisi hasil konversi (PCS).** Keduanya disimpan agar bisa diaudit.
 
 ### 2.4 `WAREHOUSE` (baru)
@@ -334,7 +359,7 @@ PR → Approval → PO (boleh banyak item, satu supplier) → Barang datang
 | Tahap | Nilai |
 |---|---|
 | PO memesan | 3 DUS |
-| Konversi | 1 DUS = 30 PCS → 3 × 30 = **90 PCS** |
+| Konversi | 1 DUS = 20 PCS → 3 × 20 = **60 PCS** |
 | `PO_Detail` | `QTY`=3, `UNIT_BUY`=`DUS`, `QTY_PER_UNIT`=30, `QTY_BASE`=90 |
 | `STOCK_LEDGER` | `QTY_IN`=3, `TRX_UNIT`=`DUS`, `QTY_BASE`=**+90** |
 | Stok gudang | bertambah 90 PCS |
@@ -544,7 +569,7 @@ Karena iPOSS dan WMS sama-sama mencatat stok, akan ada selisih. Penyebab yang pa
 | Penyebab | Contoh | Penanganan |
 |---|---|---|
 | Penjualan di iPOSS belum tercatat di WMS | Kasir jual 5 PCS, WMS belum tahu | Sinkronisasi keluar harian dari iPOSS, atau akui WMS hanya mengatur sisi **masuk** |
-| Perbedaan satuan | iPOSS mencatat 30 PCS, staf gudang mencatat 1 DUS | Konversi berjenjang wajib lengkap sebelum rilis |
+| Perbedaan satuan | iPOSS mencatat 20 PCS, staf gudang mencatat 1 DUS | Konversi berjenjang sudah dimigrasi (2.800 baris, 0 selisih) |
 | Waktu potong berbeda | iPOSS tutup buku 23:59, WMS 00:00 | Tetapkan jam potong yang sama |
 | Barang rusak/expired | WMS write-off, iPOSS belum | Kirim penyesuaian ke iPOSS atau catat sebagai selisih resmi |
 
@@ -566,7 +591,7 @@ Sudah terjawab:
 |---|---|
 | Kolom E | Qty total **seluruh gudang**, dalam satuan terkecil. Boleh dihapus setelah saldo awal pindah ke ledger |
 | Kolom F | Harga beli, acuan dari **iPOSS** |
-| `TRACK_EXPIRY` | 1.601 item kategori pakan/food/obat/vaksin/jamu/DOC/hasil bumi/shampoo/desinfektan → disetujui |
+| `TRACK_EXPIRY` | **2.220 item** kategori pakan/food/obat/vaksin/jamu/DOC/hasil bumi/shampoo/desinfektan → disetujui |
 | Sumber harga | iPOSS (harga beli & jual) |
 | Multi-item per PO | Sudah didukung: satu PO boleh banyak item untuk satu supplier |
 
@@ -574,7 +599,7 @@ Masih perlu dijawab:
 
 1. `SHELF_LIFE_DAYS` per kategori ber-expired (dari kemasan/supplier)
 2. Rantai konversi per item — **prioritas 500 item** yang punya satuan besar
-   (405 BAL/SAK/PAK/SET/RENC + ±95 item dibeli dalam DUS seperti `A591-K`)
+   (**2.730 item** punya satuan besar; sudah dimigrasi ke `UNIT_CONVERSION` — 2.800 baris)
 3. Kolom kunci dari ekspor iPOSS: nama file, nama kolom untuk kode barang, qty, harga beli, harga jual
 4. 8 nama item duplikat — apakah memang barang berbeda?
 
@@ -604,7 +629,7 @@ Karena kolom E = **total seluruh gudang** (bukan per gudang), saldo awal harus d
 | Skenario | Cara |
 |---|---|
 | Anda punya angka stok **per gudang** | Isi ledger per gudang sesuai angka tersebut |
-| Hanya ada total | **Rekomendasi:** buka opname awal per gudang (hitung fisik 3 gudang). Tidak perlu 3.875 item sekaligus — mulai dari kategori bernilai tinggi |
+| **Sudah ada stok per gudang** (Nagoya, Poncol, Ciracas) | **Rekomendasi:** saldo awal dari file per gudang, ditulis sebagai entri `OPNAME_IN` per item×gudang. Bukan dialokasikan dari total — selisih terbukti sampai 112 unit pada satu item |
 | Sementara sebelum opname | Alokasikan seluruh total ke satu gudang penampung (`NGY`), beri `NOTES = "alokasi sementara, menunggu opname"`, lalu pindahkan lewat `TRANSFER` setelah dihitung |
 
 - Untuk item `TRACK_EXPIRY=N`: satu baris `STOCK_LEDGER` bertipe `ADJUST_IN`
@@ -633,7 +658,7 @@ Karena kolom E = **total seluruh gudang** (bukan per gudang), saldo awal harus d
 | 1.1 | Tab master baru + `IPOS_CODE` + impor harga iPOSS | `PRICE_HISTORY` terisi; persentase item yang berhasil dicocokkan dilaporkan |
 | 1.2 | **Konversi satuan berjenjang** + layar Master Konversi | `1 BAL = 4 RENCENG = 40 PCS` tersimpan; endpoint `/api/units/convert` benar untuk 20 item uji |
 | 1.3 | `STOCK_LEDGER` + `STOCK_BATCH` + penomoran | Mutasi tersimpan; penomoran `LGR-`/`BTC-` unik & berurutan |
-| 1.4 | GR diperluas: satuan terima + konversi + batch/expired | Item `A591-K` 3 DUS tersimpan sebagai 90 PCS; item `TRACK_EXPIRY=Y` wajib batch+expired |
+| 1.4 | GR diperluas: satuan terima + konversi + batch/expired | Item `A591-K` 3 DUS tersimpan sebagai 60 PCS; item `TRACK_EXPIRY=Y` wajib batch+expired |
 | 1.5 | Halaman Stok Gudang + Kartu Stok | Stok per gudang cocok dengan penjumlahan `QTY_BASE` di ledger; tampil dalam 2 satuan |
 | 1.6 | Expiry Monitor + alert | Batch H-90/H-60/H-30 muncul dan terkirim notifikasi |
 | 1.7 | Unit test + dokumentasi | `typecheck`, `test`, `build` lolos; `docs/SPREADSHEET_SCHEMA.md` diperbarui |
@@ -671,7 +696,7 @@ Nilai persediaan, aging expiry, fast/slow moving, ABC analysis, dashboard KPI gu
 | 3 | `SHELF_LIFE_DAYS` per kategori ber-expired | Validasi saat GR & alert expiry |
 | 4 | Rantai konversi prioritas 500 item (BAL/SAK/PAK/SET/RENC + item dibeli dalam DUS) | Master Konversi |
 | 5 | Siapa role yang boleh adjustment & write-off? | Matriks hak akses Fase 3 |
-| 6 | Barcode di Fase 2 atau tunda? | Kecepatan opname 3.875 SKU |
+| 6 | Barcode di Fase 2 atau tunda? | Kecepatan opname 8.789 SKU |
 
 ## 10. Yang TIDAK dilakukan (sengaja)
 
