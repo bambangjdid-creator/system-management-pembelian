@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Modal from '../../components/ui/Modal';
+import { AlertCircle } from '../../icons';
 import { useAppContext } from '../../store/AppContext';
 import type { ReceiveFormData, ReceiveItem } from '../../lib/types';
+import ReceiveItemRow from './ReceiveItemRow';
 
 type Props = {
   pr: any | null;
@@ -30,6 +32,8 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [successGrNo, setSuccessGrNo] = useState('');
   const [successGrPdfLink, setSuccessGrPdfLink] = useState('');
+  const [wmsInfo, setWmsInfo] = useState<{ written: number; batches: number; notes: string[] } | null>(null);
+  const [wmsEnabled, setWmsEnabled] = useState(false);
 
   const poNo = pr?.poNumber || pr?.poNo || '';
 
@@ -51,11 +55,22 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
         const result = await res.json();
         if (!res.ok || !result.success) throw new Error(result.message || 'Gagal memuat data PO.');
         if (cancelled) return;
-        const items: ReceiveItem[] = (result.items || []).map((it: any) => ({
-          ...it,
-          qtyTerima: it.qtyTerima === '' || it.qtyTerima == null ? it.qty : it.qtyTerima,
-          keterangan: it.keterangan || '',
-        }));
+        const items: ReceiveItem[] = (result.items || []).map((it: any) => {
+          // Satuan default: satuan PO bila punya konversi, kalau tidak satuan dasar.
+          const allowed = it.wms?.allowedUnits || [];
+          const poUnit = String(it.unit || '').toUpperCase();
+          const hasPoUnit = allowed.some((u: any) => u.unit.toUpperCase() === poUnit);
+          const defaultUnit = hasPoUnit ? poUnit : (allowed[0]?.unit || it.unit || '');
+          const qty = it.qtyTerima === '' || it.qtyTerima == null ? it.qty : it.qtyTerima;
+          return {
+            ...it,
+            qtyTerima: qty,
+            keterangan: it.keterangan || '',
+            unitTerima: defaultUnit,
+            batches: [{ batchNo: '', expiredDate: '', qty }],
+          };
+        });
+        setWmsEnabled(Boolean(result.wmsEnabled));
         setFormData({ ...result.po, items });
       })
       .catch((err: any) => {
@@ -82,6 +97,27 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData) return;
+
+    // Validasi sisi klien: mencegah round-trip untuk kesalahan yang jelas.
+    for (const item of formData.items) {
+      const qty = Number(item.qtyTerima) || 0;
+      if (qty <= 0) continue;
+      if (item.wms?.trackExpiry) {
+        const batches = item.batches && item.batches.length
+          ? item.batches
+          : [{ batchNo: '', expiredDate: '', qty }];
+        if (batches.some((b: any) => !b.expiredDate)) {
+          setError(`Tanggal expired wajib diisi untuk "${item.itemName}".`);
+          return;
+        }
+        const total = batches.reduce((sum: number, b: any) => sum + (Number(b.qty) || 0), 0);
+        if (Math.abs(total - qty) > 0.0001) {
+          setError(`Total qty batch "${item.itemName}" (${total}) harus sama dengan Qty Terima (${qty}).`);
+          return;
+        }
+      }
+    }
+
     setSubmitting(true);
     setError('');
     try {
@@ -100,6 +136,12 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
             podId: it.podId,
             qtyTerima: Number(it.qtyTerima) || 0,
             keterangan: it.keterangan || '',
+            unitTerima: it.unitTerima || it.unit || '',
+            batches: (it.batches || []).map((b) => ({
+              batchNo: b.batchNo || '',
+              expiredDate: b.expiredDate || '',
+              qty: Number(b.qty) || 0,
+            })),
           })),
         }),
       });
@@ -112,6 +154,7 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
 
       setSuccessGrNo(result.grNo || '');
       setSuccessGrPdfLink(result.grPdfLink || '');
+      setWmsInfo(result.wms || null);
       onSuccess?.(result.grNo || '', result.grPdfLink || '');
     } catch (err: any) {
       setError(err.message || 'Gagal menyimpan data.');
@@ -121,6 +164,23 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
   };
 
   if (!pr) return null;
+
+  const needsAttention = (formData?.items || []).flatMap((item) => {
+    const notes: string[] = [];
+    const qty = Number(item.qtyTerima) || 0;
+    if (qty > 0 && item.wms?.trackExpiry) {
+      const batches = item.batches || [];
+      if (batches.some((b) => !b.expiredDate)) notes.push(`${item.itemName}: expired belum diisi`);
+      const total = batches.reduce((sum, b) => sum + (Number(b.qty) || 0), 0);
+      if (batches.length && Math.abs(total - qty) > 0.0001) {
+        notes.push(`${item.itemName}: total batch (${total}) ≠ qty terima (${qty})`);
+      }
+    }
+    if (qty > 0 && wmsEnabled && !item.wms?.matched) {
+      notes.push(`${item.itemName}: belum ada di Master Data WMS`);
+    }
+    return notes;
+  });
 
   const grPdfUrl = !successGrNo
     ? ''
@@ -145,6 +205,27 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
             >
               Buka Berita Acara GR (PDF)
             </a>
+          )}
+          {wmsInfo && (wmsInfo.written > 0 || wmsInfo.notes.length > 0) && (
+            <div className="mt-5 mx-auto max-w-md text-left rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">
+                Stok Gudang (WMS)
+              </p>
+              <p className="text-[11px] text-slate-600">
+                {wmsInfo.written} item tercatat ke ledger
+                {wmsInfo.batches > 0 && ` · ${wmsInfo.batches} batch expired`}
+              </p>
+              {wmsInfo.notes.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {wmsInfo.notes.map((note, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700">
+                      <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                      {note}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
           <div className="mt-6">
             <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all">
@@ -186,46 +267,41 @@ export default function ReceiveForm({ pr, onClose, onSuccess }: Props) {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-4 py-3 font-black uppercase text-slate-400">No.</th>
-                  <th className="px-4 py-3 font-black uppercase text-slate-400">Nama Barang</th>
-                  <th className="px-4 py-3 font-black uppercase text-slate-400 text-center">Satuan</th>
-                  <th className="px-4 py-3 font-black uppercase text-slate-400 text-center">Qty Order</th>
-                  <th className="px-4 py-3 font-black uppercase text-slate-400 text-center">Qty Terima</th>
-                  <th className="px-4 py-3 font-black uppercase text-slate-400">Keterangan</th>
+                  <th className="px-3 py-3 font-black uppercase text-slate-400">No.</th>
+                  <th className="px-3 py-3 font-black uppercase text-slate-400">Nama Barang</th>
+                  <th className="px-3 py-3 font-black uppercase text-slate-400 text-center">Satuan</th>
+                  <th className="px-3 py-3 font-black uppercase text-slate-400 text-center">Qty Order</th>
+                  <th className="px-3 py-3 font-black uppercase text-slate-400 text-center">Qty Terima</th>
+                  <th className="px-3 py-3 font-black uppercase text-slate-400">Keterangan</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {formData.items.map((item, idx) => (
-                  <tr key={item.podId || idx}>
-                    <td className="px-4 py-2.5 text-slate-500">{idx + 1}</td>
-                    <td className="px-4 py-2.5 font-bold text-slate-800">{item.itemName}</td>
-                    <td className="px-4 py-2.5 text-center text-slate-500">{item.unit}</td>
-                    <td className="px-4 py-2.5 text-center font-bold text-slate-700">{item.qty}</td>
-                    <td className="px-4 py-2.5">
-                      <input
-                        type="number"
-                        min={0}
-                        max={Number(item.qty) || 0}
-                        required
-                        value={item.qtyTerima ?? ''}
-                        onChange={(e) => updateItem(idx, { qtyTerima: e.target.value })}
-                        className="w-24 rounded-lg border border-slate-200 px-2.5 py-1.5 text-center font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <input
-                        type="text"
-                        value={item.keterangan || ''}
-                        onChange={(e) => updateItem(idx, { keterangan: e.target.value })}
-                        placeholder="Keterangan (wajib jika kurang)"
-                        className="w-full min-w-[160px] rounded-lg border border-slate-200 px-2.5 py-1.5 focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </td>
-                  </tr>
+                  <ReceiveItemRow
+                    key={item.podId || idx}
+                    item={item}
+                    index={idx}
+                    onChange={(patch) => updateItem(idx, patch)}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
+
+          {needsAttention.length > 0 && (
+            <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 p-3 text-[11px] text-amber-800">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                <b>{needsAttention.length} item</b> perlu perhatian sebelum disimpan:
+                <ul className="mt-1 list-disc list-inside space-y-0.5">
+                  {needsAttention.slice(0, 5).map((note, i) => (
+                    <li key={i}>{note}</li>
+                  ))}
+                  {needsAttention.length > 5 && <li>…dan {needsAttention.length - 5} lainnya</li>}
+                </ul>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block space-y-1">

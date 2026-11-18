@@ -125,6 +125,32 @@ export interface PurchaseOrder {
   keterangan?: string;
 }
 
+/** Satu satuan yang boleh dipakai saat terima (DUS/PCS/BAL...). */
+export interface ReceiveUnitOption {
+  unit: string;
+  toUnitQty: number;
+  isBase: boolean;
+}
+
+/** Info WMS untuk satu baris PO, hasil pencocokan server terhadap ITEM_MASTER. */
+export interface ReceiveItemWms {
+  matched: boolean;
+  confidence: 'ID' | 'IPOS_CODE' | 'EXACT_NAME' | 'NONE';
+  itemId: string;
+  itemName: string;
+  unitBase: string;
+  buyUnitDefault: string;
+  trackExpiry: boolean;
+  shelfLifeDays: number;
+  allowedUnits: ReceiveUnitOption[];
+}
+
+export interface ReceiveBatch {
+  batchNo: string;
+  expiredDate: string;
+  qty: string | number;
+}
+
 export interface ReceiveItem {
   podId: string;
   rowIndex?: number;
@@ -134,6 +160,12 @@ export interface ReceiveItem {
   price?: string | number;
   qtyTerima?: string | number;
   keterangan?: string;
+  /** Hasil pencocokan WMS dari server; null bila item belum ada di ITEM_MASTER. */
+  wms?: ReceiveItemWms | null;
+  /** Satuan yang dipilih user saat menerima. Kosong = ikut satuan PO. */
+  unitTerima?: string;
+  /** Batch untuk item ber-expired. Kosong = satu batch dengan qty penuh. */
+  batches?: ReceiveBatch[];
 }
 
 export interface ReceiveFormData {
