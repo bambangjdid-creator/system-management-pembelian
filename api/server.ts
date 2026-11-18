@@ -10,6 +10,7 @@ import crypto from "crypto";
 dotenv.config();
 
 import PDFDocument from "pdfkit";
+import { resolveDivisionCode, nextGrNumberFromExisting } from "./gr";
 
 const app = express();
 app.disable("x-powered-by");
@@ -20,6 +21,7 @@ const isVercel = process.env.VERCEL === "1";
 const PORT = Number(process.env.PORT || 3000);
 const PDF_DIR = isVercel ? "/tmp/PR_PDF" : path.join(process.cwd(), "PR_PDF");
 const PO_PDF_DIR = isVercel ? "/tmp/PO_PDF" : path.join(process.cwd(), "PO_PDF");
+const GR_PDF_DIR = isVercel ? "/tmp/GR_PDF" : path.join(process.cwd(), "GR_PDF");
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -44,6 +46,10 @@ const GOOGLE_DRIVE_FOLDER_ID = requireEnv("GOOGLE_DRIVE_FOLDER_ID");
 const GOOGLE_DRIVE_PO_FOLDER_ID = requireEnv("GOOGLE_DRIVE_PO_FOLDER_ID");
 const TEMPLATE_PR_ID = requireEnv("TEMPLATE_PR_ID");
 const TEMPLATE_PO_ID = requireEnv("TEMPLATE_PO_ID");
+// GR (Goods Receipt / Berita Acara) — optional so existing deployments keep
+// running; PDF generation is skipped gracefully when these are not set.
+const TEMPLATE_GR_ID = process.env.TEMPLATE_GR_ID?.trim() || "";
+const GOOGLE_DRIVE_GR_FOLDER_ID = process.env.GOOGLE_DRIVE_GR_FOLDER_ID?.trim() || "";
 const SESSION_SECRET = requireSecret("JWT_SECRET", 32);
 const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 8 * 60 * 60);
 const APP_BASE_URL = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
@@ -60,6 +66,9 @@ if (!fs.existsSync(PDF_DIR)) {
 }
 if (!fs.existsSync(PO_PDF_DIR)) {
   fs.mkdirSync(PO_PDF_DIR, { recursive: true });
+}
+if (!fs.existsSync(GR_PDF_DIR)) {
+  fs.mkdirSync(GR_PDF_DIR, { recursive: true });
 }
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
@@ -1336,6 +1345,237 @@ async function createPoPdf(poNo: string, data: any, auth: any): Promise<{ filePa
   }
 }
 
+async function createGrPdf(grNo: string, data: any, auth: any): Promise<{ filePath: string; driveLink?: string }> {
+  const fileName = `${grNo.replace(/\//g, "_")}.pdf`;
+  const filePath = path.join(GR_PDF_DIR, fileName);
+
+  if (!fs.existsSync(GR_PDF_DIR)) {
+    fs.mkdirSync(GR_PDF_DIR, { recursive: true });
+  }
+
+  const items: any[] = Array.isArray(data.items) ? data.items : [];
+
+  // 1. If Google Apps Script Web App is configured, use it (same pattern as PR/PO)
+  if (GOOGLE_SCRIPT_WEB_APP_URL && TEMPLATE_GR_ID && GOOGLE_DRIVE_GR_FOLDER_ID) {
+    console.log(`[DOCS-GR] Delegating PDF generation for ${grNo} to Google Apps Script Web App...`);
+    try {
+      const replacements: Record<string, string> = {
+        "{{GR_NO}}": grNo,
+        "{{NO_GR}}": grNo,
+        "{{NO_PO}}": data.poNo || "",
+        "{{NO_PR}}": data.prId || "",
+        "{{TANGGAL}}": data.poDate || "",
+        "{{TANGGAL_PO}}": data.poDate || "",
+        "{{RECEIVED_DATE}}": data.receivedDate || "",
+        "{{SUPPLIER}}": data.supplier || "",
+        "{{DIVISI}}": data.division || "",
+        "{{DO_NO}}": data.doNo || "",
+        "{{DRIVE_NAME}}": data.driverName || "",
+        "{{DRIVER_NAME}}": data.driverName || "",
+        "{{LICENSE_PLATE}}": data.licensePlate || "",
+        "{{RECEIVE_BY}}": data.receiveBy || data.checkerBy || "",
+        "{{CHECKER_BY}}": data.checkerBy || "",
+        "{{Purchase Name}}": data.purchaseName || "",
+      };
+
+      items.forEach((item: any, i: number) => {
+        const idx = i + 1;
+        replacements[`{{NO_${idx}}}`] = String(idx);
+        replacements[`{{NAMA_BARANG_${idx}}}`] = item.itemName || "";
+        replacements[`{{SATUAN_${idx}}}`] = item.unit || "";
+        replacements[`{{QTY_${idx}}}`] = String(item.qty ?? "");
+        replacements[`{{GR_${idx}}}`] = String(item.qtyTerima ?? "");
+        replacements[`{{KET_${idx}}}`] = item.keterangan || "";
+      });
+
+      for (let i = items.length + 1; i <= 10; i++) {
+        replacements[`{{NO_${i}}}`] = "";
+        replacements[`{{NAMA_BARANG_${i}}}`] = "";
+        replacements[`{{SATUAN_${i}}}`] = "";
+        replacements[`{{QTY_${i}}}`] = "";
+        replacements[`{{GR_${i}}}`] = "";
+        replacements[`{{KET_${i}}}`] = "";
+      }
+
+      const response = await fetch(GOOGLE_SCRIPT_WEB_APP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId: TEMPLATE_GR_ID,
+          folderId: GOOGLE_DRIVE_GR_FOLDER_ID,
+          fileName,
+          replacements,
+        }),
+      });
+
+      const result = (await response.json()) as any;
+      if (!result.success) {
+        throw new Error(result.error || "Unknown Apps Script error");
+      }
+
+      console.log(`[DOCS-GR] Apps Script generated PDF successfully. Downloading ID: ${result.fileId}...`);
+      const drive = getDrive(auth);
+      const driveStream = await drive.files.get(
+        { fileId: result.fileId, alt: "media" },
+        { responseType: "stream" }
+      );
+
+      const stream = fs.createWriteStream(filePath);
+      driveStream.data.pipe(stream);
+      await new Promise<void>((resolve, reject) => {
+        stream.on("finish", () => resolve());
+        stream.on("error", reject);
+      });
+
+      console.log(`[DOCS-GR] GR ${grNo} downloaded locally.`);
+      return { filePath, driveLink: result.webViewLink };
+    } catch (err: any) {
+      console.error(`[DOCS-GR] Apps Script method failed: ${err.message}. Falling back to template copy...`);
+    }
+  }
+
+  // 2. Direct template copy via Drive + Docs API
+  if (TEMPLATE_GR_ID && GOOGLE_DRIVE_GR_FOLDER_ID) {
+    console.log(`[GR-DOCS] Starting template merge for ${grNo}...`);
+    try {
+      const drive = getDrive(auth);
+      const docs = getDocs(auth);
+
+      console.log(`[GR-DOCS] Copying template ${TEMPLATE_GR_ID}...`);
+      const copyResponse = await drive.files.copy({
+        fileId: TEMPLATE_GR_ID,
+        requestBody: {
+          name: `TEMP_${fileName}`,
+          parents: [GOOGLE_DRIVE_GR_FOLDER_ID],
+        },
+      });
+      const copyId = copyResponse.data.id;
+      if (!copyId) throw new Error("Failed to copy GR template");
+
+      const requests: any[] = [
+        { replaceAllText: { containsText: { text: "{{GR_NO}}", matchCase: false }, replaceText: grNo } },
+        { replaceAllText: { containsText: { text: "{{NO_GR}}", matchCase: false }, replaceText: grNo } },
+        { replaceAllText: { containsText: { text: "{{NO_PO}}", matchCase: false }, replaceText: data.poNo || "" } },
+        { replaceAllText: { containsText: { text: "{{NO_PR}}", matchCase: false }, replaceText: data.prId || "" } },
+        { replaceAllText: { containsText: { text: "{{TANGGAL}}", matchCase: false }, replaceText: data.poDate || "" } },
+        { replaceAllText: { containsText: { text: "{{TANGGAL_PO}}", matchCase: false }, replaceText: data.poDate || "" } },
+        { replaceAllText: { containsText: { text: "{{RECEIVED_DATE}}", matchCase: false }, replaceText: data.receivedDate || "" } },
+        { replaceAllText: { containsText: { text: "{{SUPPLIER}}", matchCase: false }, replaceText: data.supplier || "" } },
+        { replaceAllText: { containsText: { text: "{{DIVISI}}", matchCase: false }, replaceText: data.division || "" } },
+        { replaceAllText: { containsText: { text: "{{DO_NO}}", matchCase: false }, replaceText: data.doNo || "" } },
+        { replaceAllText: { containsText: { text: "{{DRIVE_NAME}}", matchCase: false }, replaceText: data.driverName || "" } },
+        { replaceAllText: { containsText: { text: "{{DRIVER_NAME}}", matchCase: false }, replaceText: data.driverName || "" } },
+        { replaceAllText: { containsText: { text: "{{LICENSE_PLATE}}", matchCase: false }, replaceText: data.licensePlate || "" } },
+        { replaceAllText: { containsText: { text: "{{RECEIVE_BY}}", matchCase: false }, replaceText: data.receiveBy || data.checkerBy || "" } },
+        { replaceAllText: { containsText: { text: "{{CHECKER_BY}}", matchCase: false }, replaceText: data.checkerBy || "" } },
+        { replaceAllText: { containsText: { text: "{{Purchase Name}}", matchCase: false }, replaceText: data.purchaseName || "" } },
+      ];
+
+      items.forEach((item: any, i: number) => {
+        const idx = i + 1;
+        requests.push({ replaceAllText: { containsText: { text: `{{NO_${idx}}}`, matchCase: false }, replaceText: String(idx) } });
+        requests.push({ replaceAllText: { containsText: { text: `{{NAMA_BARANG_${idx}}}`, matchCase: false }, replaceText: item.itemName || "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{SATUAN_${idx}}}`, matchCase: false }, replaceText: item.unit || "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{QTY_${idx}}}`, matchCase: false }, replaceText: String(item.qty ?? "") } });
+        requests.push({ replaceAllText: { containsText: { text: `{{GR_${idx}}}`, matchCase: false }, replaceText: String(item.qtyTerima ?? "") } });
+        requests.push({ replaceAllText: { containsText: { text: `{{KET_${idx}}}`, matchCase: false }, replaceText: item.keterangan || "" } });
+      });
+
+      for (let i = items.length + 1; i <= 10; i++) {
+        requests.push({ replaceAllText: { containsText: { text: `{{NO_${i}}}`, matchCase: false }, replaceText: "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{NAMA_BARANG_${i}}}`, matchCase: false }, replaceText: "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{SATUAN_${i}}}`, matchCase: false }, replaceText: "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{QTY_${i}}}`, matchCase: false }, replaceText: "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{GR_${i}}}`, matchCase: false }, replaceText: "" } });
+        requests.push({ replaceAllText: { containsText: { text: `{{KET_${i}}}`, matchCase: false }, replaceText: "" } });
+      }
+
+      if (items.length > 10) {
+        console.warn(`[GR-DOCS] GR ${grNo} has ${items.length} items but template only has 10 rows. Items beyond 10 will not appear in PDF.`);
+      }
+
+      console.log(`[GR-DOCS] Running batchUpdate for ${copyId}...`);
+      await docs.documents.batchUpdate({
+        documentId: copyId,
+        requestBody: { requests },
+      });
+
+      console.log(`[GR-DOCS] Exporting copy to PDF...`);
+      const exportResponse = await drive.files.export(
+        { fileId: copyId, mimeType: "application/pdf" },
+        { responseType: "stream" }
+      );
+
+      const stream = fs.createWriteStream(filePath);
+      exportResponse.data.pipe(stream);
+      await new Promise((resolve, reject) => {
+        stream.on("finish", () => resolve({ filePath }));
+        stream.on("error", (err: any) => {
+          console.error(`[GR-STREAM] Export stream error: ${err.message}`);
+          reject(err);
+        });
+      });
+
+      try {
+        await drive.files.delete({ fileId: copyId });
+      } catch (e) {
+        console.warn("[GR-DOCS] Cleanup failed (non-critical)");
+      }
+
+      console.log(`[GR-DOCS] GR ${grNo} generated successfully from template.`);
+      return { filePath };
+    } catch (error: any) {
+      console.error(`[GR-DOCS] Template merge error: ${error.message}. Using PDFKit fallback.`);
+    }
+  }
+
+  // 3. PDFKit fallback (no template configured)
+  console.log(`[GR-PDFKit] Generating GR ${grNo} with PDFKit fallback...`);
+  const doc = new PDFDocument({ margin: 30, size: "A4" });
+  const stream = fs.createWriteStream(filePath);
+  doc.pipe(stream);
+
+  doc.font("Helvetica-Bold").fontSize(16).fillColor("#000000").text("LAPORAN PENERIMAAN BARANG", 30, 40, { align: "center", width: 535 });
+  doc.font("Helvetica").fontSize(10).text(`Nomor GR: ${grNo}`, 30, 65);
+  doc.text(`Nomor PO: ${data.poNo || "-"}`, 30, 80);
+  doc.text(`Nomor PR: ${data.prId || "-"}`, 30, 95);
+  doc.text(`Supplier: ${data.supplier || "-"}`, 30, 110);
+  doc.text(`Gudang Penerima: ${data.division || "-"}`, 30, 125);
+  doc.text(`Tanggal PO: ${data.poDate || "-"}`, 30, 140);
+  doc.text(`Tanggal Terima: ${data.receivedDate || "-"}`, 30, 155);
+  doc.text(`No. DO: ${data.doNo || "-"}`, 30, 170);
+  doc.text(`Supir: ${data.driverName || "-"} / ${data.licensePlate || "-"}`, 30, 185);
+  doc.text(`Diterima Oleh: ${data.receiveBy || data.checkerBy || "-"}`, 30, 200);
+  doc.text(`Checker By: ${data.checkerBy || "-"}`, 30, 215);
+
+  let curY = 240;
+  const rowHeight = 20;
+  doc.font("Helvetica-Bold").fontSize(9);
+  doc.text("No.", 30, curY, { width: 30, align: "center" });
+  doc.text("Nama Barang", 60, curY, { width: 200 });
+  doc.text("Satuan", 260, curY, { width: 50, align: "center" });
+  doc.text("Qty Order", 310, curY, { width: 60, align: "center" });
+  doc.text("Qty Terima", 370, curY, { width: 60, align: "center" });
+  doc.text("Keterangan", 430, curY, { width: 135 });
+  curY += rowHeight;
+  doc.font("Helvetica").fontSize(9);
+  items.forEach((item: any, i: number) => {
+    doc.text(String(i + 1), 30, curY, { width: 30, align: "center" });
+    doc.text(String(item.itemName || "-"), 60, curY, { width: 200 });
+    doc.text(String(item.unit || "-"), 260, curY, { width: 50, align: "center" });
+    doc.text(String(item.qty ?? ""), 310, curY, { width: 60, align: "center" });
+    doc.text(String(item.qtyTerima ?? ""), 370, curY, { width: 60, align: "center" });
+    doc.text(String(item.keterangan || "-"), 430, curY, { width: 135 });
+    curY += rowHeight;
+  });
+
+  doc.end();
+  return new Promise((resolve, reject) => {
+    stream.on("finish", () => resolve({ filePath }));
+    stream.on("error", reject);
+  });
+}
+
 async function uploadToDrive(filePath: string, fileName: string, auth: any, folderId?: string) {
   console.log(`[DRIVE] Attempting to upload ${fileName} using provided auth...`);
   try {
@@ -2353,6 +2593,8 @@ type PrDetailRow = {
   b1: any;
   b2: any;
   b3: any;
+  qtyTerima: any;
+  keterangan: string;
 };
 
 type PoHeaderRow = {
@@ -2379,6 +2621,9 @@ type PoHeaderRow = {
   licensePlate: string;
   receivedDate: string;
   checkerBy: string;
+  grNo: string;
+  receivedBy: string;
+  grPdfLink: string;
 };
 
 type PoDetailRow = {
@@ -2391,6 +2636,8 @@ type PoDetailRow = {
   qty: any;
   price: any;
   total: any;
+  qtyTerima: any;
+  keterangan: string;
 };
 
 function mapPrHeader(row: any[], index: number): PrHeaderRow {
@@ -2423,6 +2670,8 @@ function mapPrDetail(row: any[], index: number): PrDetailRow {
     b1: row[7] ?? "",
     b2: row[8] ?? "",
     b3: row[9] ?? "",
+    qtyTerima: row[10] ?? "",
+    keterangan: safeText(row[11]),
   };
 }
 
@@ -2451,6 +2700,9 @@ function mapPoHeader(row: any[], index: number): PoHeaderRow {
     licensePlate: safeText(row[19]),
     receivedDate: safeText(row[20]),
     checkerBy: safeText(row[21]),
+    grNo: safeText(row[22]),
+    receivedBy: safeText(row[23]),
+    grPdfLink: safeText(row[24]),
   };
 }
 
@@ -2464,13 +2716,15 @@ function mapPoDetail(row: any[], index: number): PoDetailRow {
     qty: row[4] ?? "",
     price: row[5] ?? "",
     total: row[6] ?? "",
+    qtyTerima: row[7] ?? "",
+    keterangan: safeText(row[8]),
   };
 }
 
 async function loadPrHeaderDetail(auth: any) {
   const [headerRows, detailRows] = await Promise.all([
     sheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A2:K`),
-    sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A2:J`),
+    sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A2:L`),
   ]);
   const headers = headerRows.map(mapPrHeader).filter((h: PrHeaderRow) => h.prId);
   const details = detailRows.map(mapPrDetail).filter((d: PrDetailRow) => d.prId);
@@ -2480,8 +2734,8 @@ async function loadPrHeaderDetail(auth: any) {
 
 async function loadPoHeaderDetail(auth: any) {
   const [headerRows, detailRows] = await Promise.all([
-    sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:V`),
-    sheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!A2:G`),
+    sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:Y`),
+    sheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!A2:I`),
   ]);
   const headers = headerRows.map(mapPoHeader).filter((h: PoHeaderRow) => h.poNo);
   const details = detailRows.map(mapPoDetail).filter((d: PoDetailRow) => d.poNo);
@@ -2514,6 +2768,8 @@ function toPrApiRow(detail: PrDetailRow, header: PrHeaderRow) {
     b1: detail.b1,
     b2: detail.b2,
     b3: detail.b3,
+    qtyTerima: detail.qtyTerima,
+    keterangan: detail.keterangan,
   };
 }
 
@@ -2549,6 +2805,11 @@ function toPoApiRow(detail: PoDetailRow, header: PoHeaderRow) {
     licensePlate: header.licensePlate,
     receivedDate: header.receivedDate,
     checkerBy: header.checkerBy,
+    grNo: header.grNo,
+    receivedBy: header.receivedBy,
+    grPdfLink: header.grPdfLink,
+    qtyTerima: detail.qtyTerima,
+    keterangan: detail.keterangan,
   };
 }
 
@@ -2589,6 +2850,28 @@ async function nextPoNumber(auth: any, yearSuffix: string) {
   return Math.max(...nums, 0) + 1;
 }
 
+// --- Goods Receipt (GR) helpers ---
+// Format: GR-[DIV_KODE]000000001-26  (9-digit sequence per division + 2-digit year)
+async function nextGrNumber(auth: any, divCode: string, yearSuffix: string): Promise<string> {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!W:W`);
+  const existing = rows.slice(1).map((row: any[]) => safeText(row[0]));
+  return nextGrNumberFromExisting(existing, divCode, yearSuffix);
+}
+
+async function findPoDetails(auth: any, poNo: string) {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!A2:I`);
+  return rows
+    .map((row: any[], i: number) => mapPoDetail(row, i))
+    .filter((d: PoDetailRow) => d.poNo === poNo);
+}
+
+async function findPrDetails(auth: any, prId: string) {
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!A2:L`);
+  return rows
+    .map((row: any[], i: number) => mapPrDetail(row, i))
+    .filter((d: PrDetailRow) => d.prId === prId);
+}
+
 async function findPrHeader(auth: any, prId: string) {
   const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PR_HEADER}!A2:K`);
   for (let i = 0; i < rows.length; i++) {
@@ -2599,7 +2882,7 @@ async function findPrHeader(auth: any, prId: string) {
 }
 
 async function findPoHeader(auth: any, poNo: string) {
-  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:V`);
+  const rows = await sheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!A2:Y`);
   for (let i = 0; i < rows.length; i++) {
     const header = mapPoHeader(rows[i], i);
     if (header.poNo === poNo) return header;
@@ -2981,13 +3264,74 @@ app.post(["/api/po", "/api/po/create"], requireRoles(["PURCHASE", "PURCHASING", 
   }
 });
 
+// GET /api/po/receive/:poNo — data untuk Form Terima Barang (header PO + list item + preview Nomor GR)
+app.get("/api/po/receive/:poNo", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const sessionUser = (req as any).sessionUser as SessionUser | undefined;
+    if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized." });
+
+    const poNo = String(req.params.poNo || "");
+    const poHeader = await findPoHeader(auth, poNo);
+    if (!poHeader) {
+      return res.status(404).json({ success: false, message: "Purchase Order tidak ditemukan." });
+    }
+
+    // Check division permission (Gudang matching) — same rule as POST receive
+    const userRole = String(sessionUser.role || "").toUpperCase();
+    const isPowerUser = ["ADMIN", "PURCHASE", "PURCHASING"].includes(userRole);
+    if (!isPowerUser) {
+      const userDiv = String(sessionUser.division || "").toUpperCase().trim();
+      const poDiv = String(poHeader.division || "").toUpperCase().trim();
+      if (!userDiv || (!poDiv.includes(userDiv) && !userDiv.includes(poDiv))) {
+        return res.status(403).json({ success: false, message: "Anda tidak memiliki hak akses untuk menerima barang di divisi ini." });
+      }
+    }
+
+    const details = await findPoDetails(auth, poNo);
+    const now = new Date();
+    const yearSuffix = String(now.getFullYear()).slice(-2);
+    const divCode = resolveDivisionCode(poHeader.division, sessionUser.divisionCode);
+    const suggestedGrNo = poHeader.grNo || (await nextGrNumber(auth, divCode, yearSuffix));
+
+    res.json({
+      success: true,
+      po: {
+        poNo: poHeader.poNo,
+        prId: poHeader.prId,
+        supplier: poHeader.supplier,
+        division: poHeader.division,
+        divCode,
+        date: poHeader.date,
+        deliveryDate: poHeader.deliveryDate,
+        purchaseName: poHeader.purchaseName,
+        status: poHeader.status,
+        grNo: poHeader.grNo,
+        suggestedGrNo,
+      },
+      items: details.map((d) => ({
+        podId: d.detailId,
+        rowIndex: d.rowIndex,
+        itemName: d.itemName,
+        unit: d.unit,
+        qty: d.qty,
+        price: d.price,
+        qtyTerima: d.qtyTerima,
+        keterangan: d.keterangan,
+      })),
+    });
+  } catch (error: any) {
+    handleApiError(res, error, "PO_RECEIVE_GET");
+  }
+});
+
 app.post("/api/po/receive", async (req, res) => {
   try {
     const auth = getAuthFromRequest(req);
     const sessionUser = (req as any).sessionUser as SessionUser | undefined;
     if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized." });
 
-    const { prId, poNo, doNo, driverName, licensePlate, checkerBy, receivedDate } = req.body;
+    const { prId, poNo, doNo, driverName, licensePlate, checkerBy, receivedDate, items } = req.body;
     if (!poNo || !doNo || !driverName || !licensePlate || !checkerBy || !receivedDate) {
       return res.status(400).json({ success: false, message: "Semua data penerimaan wajib diisi." });
     }
@@ -3012,34 +3356,152 @@ app.post("/api/po/receive", async (req, res) => {
       }
     }
 
+    // --- Validate & normalize per-item receive quantities ---
+    const poDetails = await findPoDetails(auth, poNo);
+    const detailById = new Map(poDetails.map((d) => [d.detailId, d]));
+    const safeItems: any[] = Array.isArray(items) ? items : [];
+
+    // Backward compatibility: old clients send no items -> treat as full receive
+    const receiveItems = safeItems.length
+      ? safeItems
+      : poDetails.map((d) => ({ podId: d.detailId, qtyTerima: d.qty, keterangan: "" }));
+
+    if (!receiveItems.length) {
+      return res.status(400).json({ success: false, message: "Tidak ada item pada PO ini." });
+    }
+
+    const normalizedItems: { detail: PoDetailRow; qtyTerima: number; keterangan: string }[] = [];
+    for (const item of receiveItems) {
+      const podId = safeText(item.podId || item.detailId || "");
+      const detail = podId ? detailById.get(podId) : undefined;
+      if (!detail) {
+        return res.status(400).json({ success: false, message: `Item tidak ditemukan pada PO ini: ${podId || "-"}` });
+      }
+      const qtyOrdered = asNumber(detail.qty);
+      const qtyTerima = asNumber(item.qtyTerima);
+      if (!Number.isFinite(qtyTerima) || qtyTerima < 0 || qtyTerima > qtyOrdered) {
+        return res.status(400).json({
+          success: false,
+          message: `Qty Terima untuk "${detail.itemName}" harus antara 0 dan ${qtyOrdered} ${detail.unit || ""}.`,
+        });
+      }
+      const keterangan = safeText(item.keterangan || "");
+      if (qtyTerima < qtyOrdered && !keterangan) {
+        return res.status(400).json({
+          success: false,
+          message: `Keterangan wajib diisi untuk "${detail.itemName}" karena Qty Terima kurang dari Qty Order.`,
+        });
+      }
+      normalizedItems.push({ detail, qtyTerima, keterangan });
+    }
+
+    // --- Generate GR number (server-side, per division) ---
+    const now = new Date();
+    const yearSuffix = String(now.getFullYear()).slice(-2);
+    const divCode = resolveDivisionCode(poHeader.division, sessionUser.divisionCode);
+    const grNo = poHeader.grNo || (await nextGrNumber(auth, divCode, yearSuffix));
+    const receivedBy = sessionUser.displayName || sessionUser.username;
+
     // Format receivedDate (YYYY-MM-DD -> DD/MM/YYYY)
     let formattedDate = "";
-    const dateParts = receivedDate.split("-");
+    const dateParts = String(receivedDate).split("-");
     if (dateParts.length === 3) {
       formattedDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
     } else {
-      formattedDate = receivedDate;
+      formattedDate = String(receivedDate);
     }
 
     // Update PO status to "ALREADY RECEIVE" (Column J)
     await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!J${poHeader.rowIndex}`, [["ALREADY RECEIVE"]]);
 
-    // Update Columns R to V: DO_NO, DRIVER_NAME, LICENSE_PLATE, RECEIVED_DATE, CHEKER_BY
-    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!R${poHeader.rowIndex}:V${poHeader.rowIndex}`, [[
+    // Update Columns R to X: DO_NO, DRIVER_NAME, LICENSE_PLATE, RECEIVED_DATE, CHECKER_BY, GR_NO, RECEIVED_BY
+    await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!R${poHeader.rowIndex}:X${poHeader.rowIndex}`, [[
       doNo,
       driverName,
       licensePlate,
       formattedDate,
-      checkerBy
+      checkerBy,
+      grNo,
+      receivedBy,
     ]]);
 
-    // Update PR status to "ALREADY RECEIVE"
+    // Write per-item Qty Terima + Keterangan to PO_Detail (Columns H:I)
+    for (const { detail, qtyTerima, keterangan } of normalizedItems) {
+      await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_DETAIL}!H${detail.rowIndex}:I${detail.rowIndex}`, [[qtyTerima, keterangan]]);
+    }
+
+    // Mirror Qty Terima + Keterangan to PR_Detail (Columns K:L), matched by item name + unit
     const targetPrId = prId || poHeader.prId;
+    if (targetPrId) {
+      try {
+        const prDetails = await findPrDetails(auth, targetPrId);
+        const prByKey = new Map(
+          prDetails.map((d) => [`${String(d.itemName || "").toUpperCase().trim()}|${String(d.unit || "").toUpperCase().trim()}`, d])
+        );
+        for (const { detail, qtyTerima, keterangan } of normalizedItems) {
+          const key = `${String(detail.itemName || "").toUpperCase().trim()}|${String(detail.unit || "").toUpperCase().trim()}`;
+          const prDetail = prByKey.get(key);
+          if (prDetail) {
+            await updateSheetValues(auth, `${NORMALIZED_SHEETS.PR_DETAIL}!K${prDetail.rowIndex}:L${prDetail.rowIndex}`, [[qtyTerima, keterangan]]);
+          }
+        }
+      } catch (mirrorErr: any) {
+        console.warn(`[PO_RECEIVE] Mirror to PR_Detail failed (non-critical): ${mirrorErr.message}`);
+      }
+    }
+
+    // --- Generate Berita Acara GR PDF (failure never blocks the receive save) ---
+    let grPdfLink = poHeader.grPdfLink || "";
+    const grFileName = `${grNo.replace(/[\\/]/g, "_")}.pdf`;
+    try {
+      const pdfResult = await createGrPdf(grNo, {
+        poNo: poHeader.poNo,
+        prId: targetPrId || "",
+        poDate: poHeader.date,
+        supplier: poHeader.supplier,
+        division: poHeader.division,
+        doNo,
+        driverName,
+        licensePlate,
+        receivedDate: formattedDate,
+        checkerBy,
+        receiveBy: receivedBy,
+        purchaseName: poHeader.purchaseName,
+        items: normalizedItems.map(({ detail, qtyTerima, keterangan }) => ({
+          itemName: detail.itemName,
+          unit: detail.unit,
+          qty: detail.qty,
+          qtyTerima,
+          keterangan,
+        })),
+      }, auth);
+
+      if (pdfResult && pdfResult.driveLink) {
+        grPdfLink = pdfResult.driveLink;
+      } else if (pdfResult && pdfResult.filePath) {
+        // WhatsApp/local URL is only a preview fallback; Drive link replaces it when upload succeeds.
+        const localLink = `${getAppUrl(req)}/api/pdf/gr/${encodeURIComponent(grFileName)}`;
+        const driveLink = await uploadToDrive(pdfResult.filePath, grFileName, auth, GOOGLE_DRIVE_GR_FOLDER_ID || undefined)
+          .catch((err: any) => {
+            console.warn(`[GR] Drive upload failed: ${err.message}`);
+            return null;
+          });
+        grPdfLink = driveLink || localLink;
+      }
+    } catch (pdfErr: any) {
+      console.warn(`[PO_RECEIVE] GR PDF generation failed (non-critical): ${pdfErr.message}`);
+    }
+
+    if (grPdfLink) {
+      await updateSheetValues(auth, `${NORMALIZED_SHEETS.PO_HEADER}!Y${poHeader.rowIndex}`, [[grPdfLink]]);
+    }
+
+    // Update PR status to "ALREADY RECEIVE"
     if (targetPrId) {
       await updatePrHeaderStatus(auth, targetPrId, "ALREADY RECEIVE");
     }
 
-    res.json({ success: true, message: "Barang berhasil diterima dan status diperbarui." });
+    res.json({ success: true, message: "Barang berhasil diterima dan status diperbarui.", grNo, grPdfLink });
   } catch (error: any) {
     handleApiError(res, error, "PO_RECEIVE");
   }
@@ -3586,6 +4048,67 @@ app.get("/api/pdf/po/:id", async (req, res) => {
   }
   
   console.warn(`[PDF-PO] File not found anywhere: ${filePath}`);
+  res.status(404).send("File not found");
+});
+
+app.get("/api/pdf/gr/:id", async (req, res) => {
+  let fileName = req.params.id;
+  if (!fileName.toLowerCase().endsWith('.pdf')) fileName += '.pdf';
+
+  const filePath = path.join(GR_PDF_DIR, fileName);
+  console.log(`[PDF-GR] Request for ${fileName}. Searching in ${GR_PDF_DIR}`);
+
+  if (fs.existsSync(filePath)) {
+    const stats = fs.statSync(filePath);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', stats.size);
+    res.setHeader('Content-Disposition', 'inline; filename="' + fileName + '"');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' *;");
+    res.removeHeader('X-Frame-Options');
+
+    console.log(`[PDF-GR] Serving local ${fileName} (${stats.size} bytes)`);
+    return fs.createReadStream(filePath).pipe(res);
+  }
+
+  // Fallback: Try to find on Google Drive
+  console.log(`[PDF-GR] Local ${fileName} not found. Attempting to fetch from Google Drive...`);
+  try {
+    const auth = getAuthFromRequest(req);
+    const drive = getDrive(auth);
+
+    const searchRes = await drive.files.list({
+      q: `name = '${fileName}' and parents in '${GOOGLE_DRIVE_GR_FOLDER_ID}'`,
+      fields: 'files(id, name)',
+      pageSize: 1
+    });
+
+    const files = searchRes.data.files;
+    if (files && files.length > 0) {
+      const fileId = files[0].id!;
+      console.log(`[PDF-GR] Found ${fileName} on Drive (ID: ${fileId}). Streaming to client...`);
+
+      const driveStream = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream' }
+      );
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline; filename="' + fileName + '"');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self' *;");
+      res.removeHeader('X-Frame-Options');
+
+      const localStream = fs.createWriteStream(filePath);
+      driveStream.data.pipe(localStream);
+
+      return driveStream.data.pipe(res);
+    }
+  } catch (err: any) {
+    console.error(`[PDF-GR] Drive fallback failed for ${fileName}:`, err.message);
+  }
+
+  console.warn(`[PDF-GR] File not found anywhere: ${filePath}`);
   res.status(404).send("File not found");
 });
 

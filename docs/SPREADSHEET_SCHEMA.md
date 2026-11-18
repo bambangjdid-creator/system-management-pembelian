@@ -74,16 +74,18 @@ Satu baris mewakili satu item dalam PR.
 
 | Kolom | Header | Keterangan |
 |---|---|---|
-| A | `PRD_ID` | ID detail PR, auto-generated |
-| B | `PR_ID` | Nomor PR relasi ke `PR_Header.PR_ID` |
-| C | `ITEM_NAME` | Nama barang |
-| D | `UNIT` | Satuan |
+| A | `PRD ID` | ID detail PR, auto-generated |
+| B | `PR ID` | Nomor PR relasi ke `PR_Header.PR_ID` |
+| C | `Item Name` | Nama barang |
+| D | `Unit` | Satuan |
 | E | `QTY` | Qty request |
-| F | `STOCK_ONHAND` | Stock saat ini |
-| G | `AVG_SALES` | Rata-rata sales |
+| F | `Stock Onhand` | Stock saat ini |
+| G | `Avg Sales` | Rata-rata sales |
 | H | `B1` | Sales bulan/history 1 |
 | I | `B2` | Sales bulan/history 2 |
 | J | `B3` | Sales bulan/history 3 |
+| K | `Qty Terima` | Qty yang diterima (mirror dari `PO_Detail`), diisi saat terima barang |
+| L | `Keterangan` | Keterangan penerimaan per item (mirror dari `PO_Detail`) |
 
 ## 5. `PO_Header`
 
@@ -91,23 +93,31 @@ Satu baris mewakili satu PO.
 
 | Kolom | Header | Keterangan |
 |---|---|---|
-| A | `PO_NO` | Nomor PO, auto-generated |
-| B | `PR_ID` | Nomor PR terkait |
-| C | `PURCHASE_NAME` | Pembuat PO |
-| D | `DATE` | Tanggal PO |
-| E | `DELIVERY_DATE` | Target delivery |
-| F | `SUPPLIER` | Supplier |
-| G | `NOTES` | Catatan umum PO |
-| H | `PDF_LINK` | Link PDF PO |
-| I | `STATUS` | Status PO |
-| J | `DIVISION` | Gudang/divisi tujuan |
-| K | `DISCOUNT` | Nominal diskon |
-| L | `TAX` | Nominal pajak |
-| M | `OTHERS` | Biaya lain-lain |
-| N | `GRAND_TOTAL` | Total akhir |
-| O | `DISCOUNT_PERCENT` | Persen diskon |
-| P | `TAX_PERCENT` | Persen pajak |
-| Q | `SUB_TOTAL` | Subtotal sebelum diskon/pajak/lain-lain |
+| A | `PO No` | Nomor PO, auto-generated |
+| B | `PR ID` | Nomor PR terkait |
+| C | `Purchase Name` | Pembuat PO |
+| D | `Date` | Tanggal PO |
+| E | `Delivery Date` | Target delivery |
+| F | `Supplier` | Supplier |
+| G | `Division` | Gudang/divisi tujuan |
+| H | `Notes` | Catatan umum PO |
+| I | `PDF Link` | Link PDF PO |
+| J | `Status` | Status PO (`WAITING RECEIVE` / `ALREADY RECEIVE`) |
+| K | `SubTotal` | Subtotal sebelum diskon/pajak/lain-lain |
+| L | `Discount Nominal` | Nominal diskon |
+| M | `Discount %` | Persen diskon |
+| N | `Tax Nominal` | Nominal pajak |
+| O | `Tax %` | Persen pajak |
+| P | `Others (+)` | Biaya lain-lain |
+| Q | `Grand Total` | Total akhir |
+| R | `DO_NO` | Nomor DO / Surat Jalan (diisi saat terima barang) |
+| S | `DRIVER_NAME` | Nama supir (diisi saat terima barang) |
+| T | `LICENSE_PLATE` | No. polisi kendaraan (diisi saat terima barang) |
+| U | `RECEIVED_DATE` | Tanggal terima, format DD/MM/YYYY |
+| V | `CHECKER_BY` | Pemeriksa/penerima di lapangan (header live masih `CHEKER_BY` — betulkan) |
+| W | `GR_NO` | Nomor Goods Receipt, generated server, format `GR-[DIV_KODE]000000001-26` (sudah ada di sheet live) |
+| X | `RECEIVE_BY` | Nama user yang menyimpan penerimaan (dari session login) — sudah ada di sheet live |
+| Y | `GR_PDF_LINK` | Link PDF Berita Acara GR — **kolom baru, perlu ditambahkan** |
 
 ## 6. `PO_Detail`
 
@@ -115,14 +125,15 @@ Satu baris mewakili satu item dalam PO.
 
 | Kolom | Header | Keterangan |
 |---|---|---|
-| A | `POD_ID` | ID detail PO, auto-generated |
-| B | `PO_NO` | Nomor PO relasi ke `PO_Header.PO_NO` |
-| C | `PR_ID` | Nomor PR terkait |
-| D | `ITEM_NAME` | Nama barang |
-| E | `UNIT` | Satuan |
-| F | `QTY` | Qty |
-| G | `PRICE` | Harga |
-| H | `TOTAL` | Total item (`QTY * PRICE`) |
+| A | `POD ID` | ID detail PO, auto-generated |
+| B | `PO No` | Nomor PO relasi ke `PO_Header.PO No` |
+| C | `Item Name` | Nama barang |
+| D | `Unit` | Satuan |
+| E | `Qty` | Qty order |
+| F | `Price` | Harga |
+| G | `Total Price` | Total item (`Qty * Price`) |
+| H | `QTY_TERIMA` | Qty yang diterima (diisi saat terima barang) |
+| I | `KETERANGAN` | Keterangan penerimaan per item |
 
 ## Cara setup cepat
 

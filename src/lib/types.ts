@@ -86,6 +86,8 @@ export interface PurchaseRequest {
   b1?: string | number;
   b2?: string | number;
   b3?: string | number;
+  qtyTerima?: string | number;
+  keterangan?: string;
 }
 
 export interface PurchaseOrder {
@@ -116,6 +118,37 @@ export interface PurchaseOrder {
   licensePlate?: string;
   receivedDate?: string;
   checkerBy?: string;
+  grNo?: string;
+  receivedBy?: string;
+  grPdfLink?: string;
+  qtyTerima?: string | number;
+  keterangan?: string;
+}
+
+export interface ReceiveItem {
+  podId: string;
+  rowIndex?: number;
+  itemName: string;
+  unit: string;
+  qty: string | number;
+  price?: string | number;
+  qtyTerima?: string | number;
+  keterangan?: string;
+}
+
+export interface ReceiveFormData {
+  poNo: string;
+  prId: string;
+  supplier?: string;
+  division?: string;
+  divCode?: string;
+  date?: string;
+  deliveryDate?: string;
+  purchaseName?: string;
+  status?: string;
+  grNo?: string;
+  suggestedGrNo?: string;
+  items: ReceiveItem[];
 }
 
 export const WAREHOUSE_ADDRESS_INFO: Record<string, { name: string; address: string }> = {
