@@ -39,6 +39,11 @@ Lihat `.env.example` untuk daftar lengkap:
 - `TEMPLATE_PR_ID`
 - `TEMPLATE_PO_ID`
 - `JWT_SECRET`
+
+Opsional (dipakai untuk Berita Acara GR / Terima Barang):
+
+- `TEMPLATE_GR_ID` — Google Doc template Berita Acara GR
+- `GOOGLE_DRIVE_GR_FOLDER_ID` — folder Drive tujuan PDF GR (mis. folder `GR_PDF`)
 - `ALLOWED_ORIGINS`
 - `APP_BASE_URL`
 

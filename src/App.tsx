@@ -535,6 +535,8 @@ export default function App() {
     stats,
     statsLoading,
     fetchStats,
+    fetchPRs,
+    fetchPOs,
     prList,
     poList,
     stockMaster,
@@ -690,6 +692,11 @@ export default function App() {
                     <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Nomor Polisi:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.licensePlate || '-'}</span></p>
                     <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Tanggal Diterima:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.receivedDate || '-'}</span></p>
                     <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Checker By:</span><span className="font-bold text-emerald-700">{previewPo.checkerBy || '-'}</span></p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Nomor GR:</span><span className="font-bold text-indigo-600 font-mono">{previewPo.grNo || '-'}</span></p>
+                    <p className="flex justify-between"><span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Diterima Oleh:</span><span className="font-bold text-slate-800 dark:text-slate-200">{previewPo.receivedBy || '-'}</span></p>
+                    {previewPo.grPdfLink && (
+                      <a href={previewPo.grPdfLink} target="_blank" rel="noreferrer" className="inline-block mt-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-all">Buka Berita Acara GR (PDF)</a>
+                    )}
                   </div>
                 )}
               </div>

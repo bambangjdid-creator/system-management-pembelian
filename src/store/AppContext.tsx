@@ -9,6 +9,8 @@ export type AppContextValue = {
   stats: any;
   statsLoading: boolean;
   fetchStats: () => unknown;
+  fetchPRs: () => unknown;
+  fetchPOs: () => unknown;
   prList: PurchaseRequest[];
   poList: PurchaseOrder[];
   stockMaster: StockItem[];
