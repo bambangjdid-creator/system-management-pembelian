@@ -15,13 +15,15 @@ Aplikasi sekarang adalah **sistem pembelian** (PR → approval → PO → GR). W
 lapisan baru: **persediaan** (inventory). Perubahan terbesar bukan pada tampilan, tapi pada
 **cara menyimpan stok**: dari "satu angka di Master_Stock" menjadi **buku besar mutasi (stock ledger)**.
 
-### Tiga keputusan inti yang harus disepakati
+### Lima keputusan inti yang harus disepakati
 
 | # | Keputusan | Alasan |
 |---|---|---|
 | 1 | Stok **tidak** disimpan sebagai angka di `Master_Stock`, melainkan dihitung dari `STOCK_LEDGER` | Tanpa jejak audit, WMS hanya tebakan. Opname, koreksi, dan laporan butuh riwayat. |
 | 2 | `TRACK_EXPIRY` ditentukan **per item**, tanggal expired disimpan **per batch** | Tanggal kedaluwarsa berbeda tiap kedatangan, tidak bisa menempel di item |
 | 3 | Fase 1 **tetap Google Sheets**, tetapi strukturnya disiapkan agar mudah pindah ke Postgres | Perubahan kecil dulu, risiko rendah; migrasi dilakukan saat data sudah besar |
+| 4 | **Stok selalu dalam satuan terkecil (base unit).** Satuan besar (DUS/BAL/SAK/RENCENG) hanya untuk transaksi, dikonversi saat simpan | Bisnis melayani partai besar **dan** eceran PCS. Kalau stok disimpan dalam DUS, penjualan 1 PCS tidak bisa dicatat |
+| 5 | **iPOSS = sumber acuan harga** (beli & jual), bukan sumber stok | iPOSS sudah operasional; aplikasi ini yang mengatur penerimaan & mutasi gudang |
 
 ### Fakta data produksi (hasil pembacaan langsung, 2026-11-18)
 
@@ -30,10 +32,12 @@ lapisan baru: **persediaan** (inventory). Perubahan terbesar bukan pada tampilan
 | Item di `Master_Stock` | **3.875 baris** | Terlalu banyak untuk diopname manual tanpa barcode |
 | Kategori | **80 kategori** | Perlu master kategori terpisah (sekarang teks bebas) |
 | Nama item duplikat | 8 nama / 16 baris | Perlu `ITEM_ID` sebagai kunci, bukan nama |
-| Header `Master_Stock` | A–D saja, padahal **kolom E dan F berisi data** (3.875 & 3.842 baris) | Header tidak sinkron; E/F kemungkinan stok & harga. **Harus diputuskan bersama pemilik data.** |
-| Nilai kolom E | 0 – 51.972, median 3 | Dugaan kuat: **stok**. Jika benar, ini stok gudang mana? (3 gudang) |
-| Nilai kolom F | 0 – 2.175.000, median 23.500 | Dugaan kuat: **harga** (harga di `PO_Detail` median ~23.500 juga) |
-| Satuan | PCS 3.166, SAK 166, SET 74, BAL 73, PAK 55, ROLL 17, RENC 17, kosong 251 | Perlu konversi satuan untuk item BAL/SAK/PAK |
+| Header `Master_Stock` | A–D saja, padahal kolom E dan F berisi data (3.875 & 3.842 baris) | Header perlu dirapikan: E → `STOCK_QTY`, F → `BUY_PRICE` |
+| Kolom E (dikonfirmasi) | **Qty total seluruh gudang**, dalam satuan terkecil; 0 – 51.972 | Boleh dihapus setelah saldo awal pindah ke ledger (lihat §7 Langkah 3) |
+| Kolom F (dikonfirmasi) | **Harga beli**, acuan dari iPOSS; median 23.500 | Dipakai sebagai pembanding harga PO |
+| Satuan | PCS 3.166, SAK 166, SET 74, BAL 73, PAK 55, ROLL 17, RENC 17, kosong 251 | **Satuan di master = satuan terkecil.** Perlu tabel kemasan berjenjang |
+| Contoh nyata | `A591-K` — unit `PCS`, stok 2.146, harga 13.500. Pembelian datang dalam **DUS (1 DUS = 30 PCS)** | Membuktikan perlunya multi-satuan: beli DUS, simpan PCS, jual PCS |
+| Kode barang | Hanya 2 item memakai pola kode (`A591-K`, `A594-K`); 3.873 lain berupa nama | Perlu `IPOS_CODE` sebagai jembatan ke iPOSS, terpisah dari `ITEM_ID` |
 | Item yang perlu `TRACK_EXPIRY=Y` | **1.601 item (41%)** | Pakan, cat/dog food, obat, vaksin, jamu, DOC, hasil bumi, shampoo, desinfektan |
 | Item `TRACK_EXPIRY=N` | **2.274 item (59%)** | Mainan, sangkar, aksesoris pancing/burung, joran, kerodong, dll. |
 | Gudang aktif | GD NAGOYA, GD PONCOL, GD CIRACAS | Multi-lokasi → butuh transfer & stok per gudang |
@@ -56,15 +60,39 @@ lapisan baru: **persediaan** (inventory). Perubahan terbesar bukan pada tampilan
    ┌────────────────────────────────────────────────────────────────────────┐
    │                    LAPISAN BARU: PERSEDIAAN (WMS)                      │
    │                                                                        │
-   │  Master Item ──► Stock Ledger ──► Stock Batch (expired)                │
-   │       │                 │                  │                           │
-   │       ├── Putaway ◄─────┘                  ├── FEFO Picking            │
-   │       ├── Permintaan Divisi (Issue)        ├── Alert Expiry            │
-   │       ├── Transfer Antar Gudang            ├── Write-off / Karantina   │
-   │       ├── Stock Opname (cycle count)       └── Laporan Aging           │
+   │  Master Item ──► Konversi Satuan ──► Stock Ledger ──► Stock Batch      │
+   │       │            (BAL→RENC→PCS)         │              (expired)     │
+   │       │                                   │                  │         │
+   │       ├── Putaway ◄───────────────────────┘                  ├── FEFO  │
+   │       ├── Permintaan Divisi (Issue)                          ├── Alert │
+   │       ├── Transfer Antar Gudang                              ├── Write-off
+   │       ├── Stock Opname (cycle count)                         └── Aging │
    │       └── Reorder Point ──► usul PR (balik ke modul lama)              │
    └────────────────────────────────────────────────────────────────────────┘
+              ▲                                        ▲
+              │ harga acuan                            │ qty satuan terkecil
+   ┌──────────┴───────────┐                  ┌──────────┴────────────┐
+   │       iPOSS          │                  │  Ekspor stok iPOSS    │
+   │  (sistem operasional │                  │  (qty dalam PCS/BTL)  │
+   │   penjualan & harga) │                  └───────────────────────┘
+   └──────────────────────┘
 ```
+
+### Pembagian peran dengan iPOSS (penting)
+
+| Aspek | iPOSS | Aplikasi WMS ini |
+|---|---|---|
+| Penjualan ke pelanggan | ✅ sumber utama | ❌ tidak menangani |
+| Harga beli & harga jual | ✅ **acuan** | menyimpan riwayat & pembanding |
+| Stok barang | ✅ punya angka (satuan terkecil) | ✅ punya ledger sendiri (per gudang, per batch) |
+| Penerimaan barang dari supplier | — | ✅ sumber utama (GR + batch + expired) |
+| Mutasi internal gudang | — | ✅ sumber utama |
+| Expired / batch / FEFO | — | ✅ sumber utama |
+
+> **Catatan penting:** ada **dua angka stok** (iPOSS dan WMS). Ini harus dikelola sadar.
+> Rekomendasi: WMS jadi acuan untuk **barang masuk & mutasi gudang**, lalu angka WMS
+> disinkronkan/direkonsiliasi dengan iPOSS setiap periode (lihat §6.5). Jangan mencoba
+> menyatukan keduanya di Fase 1 — itu pekerjaan integrasi tersendiri.
 
 Prinsip: **modul lama tidak dibongkar**. GR (yang baru selesai) diperluas agar menulis ke ledger.
 PR/PO tetap seperti sekarang, hanya ditambah kemampuan "usulan otomatis saat stok minimum".
@@ -85,17 +113,25 @@ ditampilkan `DD/MM/YYYY` tetap dipertahankan pada kolom yang sudah ada.
 | B | `ITEM_NAME` | teks | ya | Nama barang (boleh duplikat, kunci tetap ITEM_ID) |
 | C | `CATEGORY` | teks | ya | Diambil dari `CATEGORY_MASTER` |
 | D | `SUPPLIER` | teks | tidak | Supplier utama |
-| E | `UNIT_BASE` | teks | ya | Satuan terkecil (PCS/SAK/BAL/…) |
-| F | `TRACK_EXPIRY` | `Y`/`N` | ya | **Penentu apakah batch & expired wajib** |
-| G | `TRACK_BATCH` | `Y`/`N` | ya | `Y` bila nomor batch supplier perlu dilacak walau tanpa expired |
-| H | `SHELF_LIFE_DAYS` | angka | tidak | Umur simpan (hari). Dipakai validasi saat GR |
-| I | `MIN_STOCK` | angka | tidak | Batas bawah → memicu usulan PR |
-| J | `MAX_STOCK` | angka | tidak | Batas atas → peringatan overstock |
-| K | `REORDER_POINT` | angka | tidak | Titik pemesanan ulang |
-| L | `IS_ACTIVE` | `Y`/`N` | ya | Nonaktifkan tanpa menghapus riwayat |
-| M | `NOTES` | teks | tidak | Catatan |
-| N | `CREATED_AT` | tanggal | ya | |
-| O | `UPDATED_AT` | tanggal | ya | |
+| E | `UNIT_BASE` | teks | ya | **Satuan terkecil** (PCS/BTL/SCT). Semua stok disimpan dalam satuan ini |
+| F | `BUY_UNIT_DEFAULT` | teks | tidak | Satuan beli yang biasa dipakai (DUS/BAL/SAK) — hanya prefill form |
+| G | `IPOS_CODE` | teks | tidak | **Kode barang di iPOSS**, jembatan untuk tarik harga beli & jual |
+| H | `IPOS_NAME` | teks | tidak | Nama barang versi iPOSS (untuk pencocokan saat impor) |
+| I | `TRACK_EXPIRY` | `Y`/`N` | ya | **Penentu apakah batch & expired wajib** |
+| J | `TRACK_BATCH` | `Y`/`N` | ya | `Y` bila nomor batch supplier perlu dilacak walau tanpa expired |
+| K | `SHELF_LIFE_DAYS` | angka | tidak | Umur simpan (hari). Dipakai validasi saat GR |
+| L | `MIN_STOCK` | angka | tidak | Batas bawah (dalam `UNIT_BASE`) → memicu usulan PR |
+| M | `MAX_STOCK` | angka | tidak | Batas atas → peringatan overstock |
+| N | `REORDER_POINT` | angka | tidak | Titik pemesanan ulang |
+| O | `IS_ACTIVE` | `Y`/`N` | ya | Nonaktifkan tanpa menghapus riwayat |
+| P | `NOTES` | teks | tidak | Catatan |
+| Q | `CREATED_AT` | tanggal | ya | |
+| R | `UPDATED_AT` | tanggal | ya | |
+
+> **Kenapa `UNIT_BASE` wajib satuan terkecil?** Bisnis melayani partai besar *dan* eceran PCS.
+> Contoh `A591-K`: dibeli dalam **DUS (30 PCS)**, dijual eceran **PCS**. Kalau stok disimpan
+> dalam DUS, penjualan 1 PCS tidak bisa dicatat tanpa angka desimal. Karena itu:
+> **beli dalam DUS → konversi → simpan 30 PCS → jual per PCS.**
 
 > `Master_Stock` lama **tidak dihapus**. Setelah migrasi, ia menjadi sumber `ITEM_MASTER`
 > dan tetap dipakai sebagai daftar pilihan di form PR (read-only).
@@ -113,18 +149,41 @@ ditampilkan `DD/MM/YYYY` tetap dipertahankan pada kolom yang sudah ada.
 Manfaat: mempercepat pembuatan item baru (3.875 item, penambahan rutin), dan menjaga
 `TRACK_EXPIRY` konsisten — mis. semua `CAT FOOD WET KALENG` otomatis `Y` dengan shelf life 540 hari.
 
-### 2.3 `UNIT_CONVERSION` (baru)
+### 2.3 `UNIT_CONVERSION` (baru — **berjenjang, ini yang paling kritis**)
 
-| Kolom | Nama | Keterangan |
-|---|---|---|
-| A | `ITEM_ID` | atau `CATEGORY_ID` bila berlaku umum |
-| B | `FROM_UNIT` | mis. `BAL` |
-| C | `TO_UNIT` | mis. `SAK` |
-| D | `FACTOR` | mis. `2` (1 BAL = 2 SAK) |
-| E | `NOTES` | |
+Mendukung rantai kemasan lebih dari 2 tingkat, mis.:
 
-Wajib untuk 405 item bersatuan BAL/SAK/PAK/SET. Tanpa ini, stok akan selalu selisih
-saat pembelian masuk dalam BAL tetapi permintaan keluar dalam SAK.
+```
+1 BAL  = 4 RENCENG = 4 × 10 = 40 PCS
+1 DUS  = 30 PCS
+1 SAK  = 25 KG (bila satuan terkecil KG, bukan PCS)
+```
+
+| Kolom | Nama | Tipe | Keterangan |
+|---|---|---|---|
+| A | `CONV_ID` | teks | `CNV-000001` |
+| B | `ITEM_ID` | teks | Kosong bila berlaku per kategori (pakai `CATEGORY_ID`) |
+| C | `CATEGORY_ID` | teks | dipakai bila konversi sama untuk semua item di kategori |
+| D | `FROM_UNIT` | teks | satuan besar, mis. `BAL` |
+| E | `TO_UNIT` | teks | satuan tujuan, mis. `RENCENG` |
+| F | `TO_UNIT_QTY` | angka | mis. `4` (1 BAL = 4 RENCENG) |
+| G | `LEVEL` | angka | 1 = paling atas (BAL), 2 = RENCENG, 3 = PCS. Urutan konversi |
+| H | `IS_ACTIVE` | `Y`/`N` | |
+| I | `NOTES` | teks | |
+
+**Cara hitung:** konversi dilakukan **bertingkat** sampai mencapai `UNIT_BASE`. Contoh:
+beli 3 BAL → BAL→RENCENG (×4) → RENCENG→PCS (×10) → **3 × 4 × 10 = 120 PCS** masuk ke ledger.
+
+**Aturan validasi:**
+- Setiap item yang punya >1 satuan **wajib** punya rantai konversi lengkap sampai `UNIT_BASE`.
+- Item tanpa konversi → hanya boleh transaksi dalam `UNIT_BASE`.
+- Konversi **tidak boleh** diubah bila sudah ada transaksi; buat versi baru (`IS_ACTIVE=N` pada yang lama).
+
+**Cakupan awal:** 405 item bersatuan BAL/SAK/PAK/SET/RENC + item yang dibeli dalam DUS
+seperti `A591-K`. Total perkiraan ±500 item perlu diisi — sisanya (PCS) tidak perlu konversi.
+
+> **Kolom `QTY_TERIMA` di form GR tetap dalam satuan transaksi (DUS), sedangkan
+> `STOCK_LEDGER.QTY_BASE` berisi hasil konversi (PCS).** Keduanya disimpan agar bisa diaudit.
 
 ### 2.4 `WAREHOUSE` (baru)
 
@@ -150,10 +209,10 @@ Append-only. **Tidak boleh ada UPDATE atau DELETE.** Koreksi dilakukan dengan ba
 | E | `ITEM_ID` | relasi `ITEM_MASTER` |
 | F | `WH_CODE` | gudang |
 | G | `BATCH_ID` | wajib bila item `TRACK_EXPIRY=Y` / `TRACK_BATCH=Y` |
-| H | `QTY_IN` | angka ≥ 0 |
-| I | `QTY_OUT` | angka ≥ 0 |
-| J | `UNIT` | satuan saat transaksi |
-| K | `QTY_BASE` | qty setelah konversi ke `UNIT_BASE` (positif masuk, negatif keluar) |
+| H | `QTY_IN` | angka ≥ 0 | qty dalam **satuan transaksi** (mis. 3 DUS) |
+| I | `QTY_OUT` | angka ≥ 0 | qty dalam **satuan transaksi** |
+| J | `TRX_UNIT` | teks | satuan saat transaksi: `DUS`, `BAL`, `PCS` |
+| K | `QTY_BASE` | angka | qty setelah konversi ke `UNIT_BASE`; **inilah yang dipakai semua perhitungan stok** |
 | L | `REF_TYPE` | `GR` / `PR` / `TRANSFER` / `OPNAME` / `ADJUST` / `WRITEOFF` / `RETURN` |
 | M | `REF_NO` | nomor dokumen sumber (mis. `GR-NGY000000012-26`) |
 | N | `BIN_CODE` | lokasi rak (opsional Fase 2) |
@@ -211,10 +270,30 @@ Aturan validasi (ditegakkan di server):
 | `PO_Detail` | tetap `H=QTY_TERIMA`, `I=KETERANGAN` | tidak berubah |
 | `PR_Detail` | tetap `K=Qty Terima`, `L=Keterangan` | tidak berubah |
 | `PO_Detail` | **tambah** `J=BATCH_NO`, `K=EXPIRED_DATE` (hanya terisi untuk item `TRACK_EXPIRY=Y`) | tambahan |
+| `PO_Detail` | **tambah** `L=UNIT_BUY`, `M=QTY_PER_UNIT`, `N=QTY_BASE` — menyimpan "3 DUS × 30 = 90 PCS" agar bisa diaudit | tambahan |
 | `PR_Header` | **tambah** `L=ISSUE_STATUS` (untuk permintaan divisi, lihat §3.3) | opsional |
 | `Master_Stock` | dipertahankan; **header A–F dirapikan** dan diberi label `STOCK_QTY`, `PRICE` | perbaikan |
 
-### 2.8 Tabel pendukung fase lanjutan
+### 2.8 `PRICE_HISTORY` (baru — jembatan ke iPOSS)
+
+iPOSS adalah **acuan harga**. Aplikasi ini tidak menghitung harga jual; ia menyimpan riwayat
+harga dari iPOSS + harga beli aktual dari PO, agar Purchase bisa membandingkan.
+
+| Kolom | Nama | Keterangan |
+|---|---|---|
+| A | `PRICE_ID` | `PRC-000001` |
+| B | `ITEM_ID` | relasi `ITEM_MASTER` |
+| C | `IPOS_CODE` | kode barang iPOSS |
+| D | `PRICE_DATE` | tanggal berlaku |
+| E | `BUY_PRICE` | harga beli acuan (dari iPOSS) **per `UNIT_BASE`** |
+| F | `SELL_PRICE` | harga jual acuan (dari iPOSS) **per `UNIT_BASE`** |
+| G | `SOURCE` | `IPOSS_IMPORT` / `PO_ACTUAL` / `MANUAL` |
+| H | `REF_NO` | nomor PO bila `PO_ACTUAL` |
+| I | `CREATED_BY` | |
+
+Kolom F (`BUY_PRICE`) di `Master_Stock` sekarang menjadi **snapshot terakhir** dari tabel ini.
+
+### 2.9 Tabel pendukung fase lanjutan
 
 | Tabel | Isi | Fase |
 |---|---|---|
@@ -231,18 +310,35 @@ Aturan validasi (ditegakkan di server):
 ### 3.1 Alur masuk barang (sudah ada, diperluas)
 
 ```text
-PR → Approval → PO → Barang datang
+PR → Approval → PO (boleh banyak item, satu supplier) → Barang datang
    → Staf gudang klik TERIMA (form sekarang)
+   → [BARU] per item: pilih satuan terima (DUS/BAL/SAK/PCS) + qty
+              sistem menghitung qty dalam satuan terkecil
+              contoh: 3 DUS × 30 = 90 PCS
    → [BARU] bila item TRACK_EXPIRY=Y: isi No. Batch + Expired Date per item
    → Validasi: expired > hari ini, sisa umur ≥ SHELF_LIFE_DAYS minimum
    → Simpan:
-       1. PO_Header  (status, DO, supir, nopol, GR_NO, dll)          ← sudah ada
-       2. PO_Detail  H:I (qty terima, keterangan) + J:K (batch, exp)  ← diperluas
-       3. PR_Detail  K:L (mirror)                                    ← sudah ada
-       4. STOCK_BATCH  (buat batch baru per item ber-expired)
-       5. STOCK_LEDGER (baris RECEIVE per item)
-       6. Berita Acara GR PDF → Drive GR_PDF                         ← sudah ada
+       1. PO_Header   (status, DO, supir, nopol, GR_NO, dll)               ← sudah ada
+       2. PO_Detail   H:I (qty terima, keterangan)
+                      J:K (batch, expired)
+                      L:N (unit beli, qty per unit, qty base)              ← diperluas
+       3. PR_Detail   K:L (mirror)                                         ← sudah ada
+       4. STOCK_BATCH (batch baru per item ber-expired, qty dalam PCS)
+       5. STOCK_LEDGER (RECEIVE: qty transaksi + QTY_BASE hasil konversi)
+       6. PRICE_HISTORY (harga beli aktual dari PO ini)
+       7. Berita Acara GR PDF → Drive GR_PDF                              ← sudah ada
 ```
+
+**Contoh konkret `A591-K`:**
+
+| Tahap | Nilai |
+|---|---|
+| PO memesan | 3 DUS |
+| Konversi | 1 DUS = 30 PCS → 3 × 30 = **90 PCS** |
+| `PO_Detail` | `QTY`=3, `UNIT_BUY`=`DUS`, `QTY_PER_UNIT`=30, `QTY_BASE`=90 |
+| `STOCK_LEDGER` | `QTY_IN`=3, `TRX_UNIT`=`DUS`, `QTY_BASE`=**+90** |
+| Stok gudang | bertambah 90 PCS |
+| Penjualan eceran | 1 PCS → `QTY_BASE`=**−1** → sisa 89 PCS |
 
 ### 3.2 Penentuan batch & expired saat terima
 
@@ -273,6 +369,10 @@ Divisi minta barang → ISSUE (status WAITING)
 Keputusan penting: **bila stok tidak cukup**, sistem menawarkan dua jalur —
 (a) penuhi sebagian lalu buat PR pembelian untuk sisanya, atau (b) tolak dan buat PR.
 Saran: **(a)**, karena divisi tidak boleh menunggu pembelian untuk barang yang ada.
+
+**Permintaan boleh dalam satuan besar maupun eceran.** Divisi bisa minta "2 RENCENG" atau
+"5 PCS"; sistem mengonversi ke `QTY_BASE` saat menulis ledger, dan menampilkan sisa stok
+dalam **kedua satuan** (mis. "sisa 89 PCS = 2 RENCENG + 9 PCS") supaya staf gudang tidak salah hitung.
 
 ### 3.4 FEFO (First Expired First Out)
 
@@ -340,7 +440,11 @@ Semua `/api/*` wajib sesi login (kecuali `/api/health`, `/api/login`, `/api/pdf/
 | PUT | `/api/items/:itemId` | ADMIN, PURCHASE | Edit item |
 | PATCH | `/api/items/:itemId/expiry` | ADMIN | Set `TRACK_EXPIRY`, shelf life |
 | GET | `/api/categories` | semua login | Master kategori + default expiry |
-| GET | `/api/units/conversion` | semua login | Konversi satuan |
+| GET | `/api/units/conversion` | semua login | Rantai konversi berjenjang per item |
+| POST | `/api/units/conversion` | ADMIN | Tambah/ubah konversi (ditolak bila item sudah punya transaksi) |
+| POST | `/api/units/convert` | semua login | Bantu hitung: `{itemId, from:"DUS", qty:3}` → `{base:90}` |
+| GET | `/api/prices/:itemId` | semua login | Riwayat harga beli & jual (iPOSS + PO aktual) |
+| POST | `/api/prices/import` | ADMIN, PURCHASE | Impor harga dari ekspor iPOSS (CSV) |
 | GET | `/api/warehouses` | semua login | Daftar gudang |
 
 ### 4.2 Persediaan (Fase 1)
@@ -398,7 +502,9 @@ Semua `/api/*` wajib sesi login (kecuali `/api/health`, `/api/login`, `/api/pdf/
 | **Permintaan Divisi** (baru) | Form permintaan + FEFO suggestion + surat jalan | 2 |
 | **Transfer** (baru) | Buat transfer, status in-transit, konfirmasi terima | 2 |
 | **Opname** (baru) | Layar hitung fisik per kategori, bandingkan sistem | 3 |
-| `SettingsView` | Kelola item, kategori, konversi satuan, gudang | 1 |
+| `SettingsView` | Kelola item, kategori, **konversi berjenjang**, gudang, kode iPOSS | 1 |
+| **Master Konversi** (baru) | Layar khusus: pilih item → susun rantai `BAL → RENCENG → PCS` dengan uji hasil ("1 BAL = 40 PCS") | 1 |
+| **Harga** (baru) | Riwayat harga beli/jual per item, bandingkan PO aktual vs acuan iPOSS | 1 |
 | Sidebar/menu | Grup menu baru: **GUDANG** (Stok, Kartu Stok, Expiry, Opname, Transfer) | 1 |
 
 ---
@@ -426,23 +532,59 @@ Semua `/api/*` wajib sesi login (kecuali `/api/health`, `/api/login`, `/api/pdf/
 - Adjustment & write-off **tidak boleh** dilakukan orang yang sama dengan yang menyetujui.
 - Semua mutasi stok menyimpan `USER` — tidak ada perubahan tanpa jejak.
 
-### 6.4 Rekonsiliasi
+### 6.4 Rekonsiliasi internal
 
 Rutin harian: bandingkan `STOCK_BATCH.QTY_ONHAND` dengan hasil penjumlahan `STOCK_LEDGER`
 per `ITEM_ID` + `WH_CODE` + `BATCH_ID`. Selisih → log peringatan, bukan koreksi otomatis.
+
+### 6.5 Rekonsiliasi dengan iPOSS (risiko utama)
+
+Karena iPOSS dan WMS sama-sama mencatat stok, akan ada selisih. Penyebab yang paling sering:
+
+| Penyebab | Contoh | Penanganan |
+|---|---|---|
+| Penjualan di iPOSS belum tercatat di WMS | Kasir jual 5 PCS, WMS belum tahu | Sinkronisasi keluar harian dari iPOSS, atau akui WMS hanya mengatur sisi **masuk** |
+| Perbedaan satuan | iPOSS mencatat 30 PCS, staf gudang mencatat 1 DUS | Konversi berjenjang wajib lengkap sebelum rilis |
+| Waktu potong berbeda | iPOSS tutup buku 23:59, WMS 00:00 | Tetapkan jam potong yang sama |
+| Barang rusak/expired | WMS write-off, iPOSS belum | Kirim penyesuaian ke iPOSS atau catat sebagai selisih resmi |
+
+**Rekomendasi tegas:** tetapkan **satu sumber kebenaran per peran** sejak awal —
+- Stok **fisik gudang** (masuk, mutasi, batch, expired) → **WMS**
+- Stok **komersial** (terjual, tersedia untuk dijual) → **iPOSS**
+
+Lalu buat laporan selisih mingguan. Jangan diam-diam menimpa angka satu sama lain.
 
 ---
 
 ## 7. Rencana Migrasi Data (dijalankan sebelum Fase 1 rilis)
 
-**Langkah 0 — Konfirmasi ke pemilik data (WAJIB, manusia)**
+**Langkah 0 — Konfirmasi ke pemilik data**
 
-1. Kolom **E** di `Master_Stock` — apakah benar stok? Gudang mana? Per tanggal berapa?
-2. Kolom **F** — apakah harga beli terakhir?
-3. 80 kategori → mana yang `TRACK_EXPIRY=Y` (usulan awal sudah dibuat, perlu dikoreksi)
-4. `SHELF_LIFE_DAYS` per kategori ber-expired (dari supplier/kemasan)
-5. Konversi satuan untuk 405 item BAL/SAK/PAK/SET
-6. 8 nama item duplikat — apakah memang barang berbeda?
+Sudah terjawab:
+
+| Pertanyaan | Jawaban |
+|---|---|
+| Kolom E | Qty total **seluruh gudang**, dalam satuan terkecil. Boleh dihapus setelah saldo awal pindah ke ledger |
+| Kolom F | Harga beli, acuan dari **iPOSS** |
+| `TRACK_EXPIRY` | 1.601 item kategori pakan/food/obat/vaksin/jamu/DOC/hasil bumi/shampoo/desinfektan → disetujui |
+| Sumber harga | iPOSS (harga beli & jual) |
+| Multi-item per PO | Sudah didukung: satu PO boleh banyak item untuk satu supplier |
+
+Masih perlu dijawab:
+
+1. `SHELF_LIFE_DAYS` per kategori ber-expired (dari kemasan/supplier)
+2. Rantai konversi per item — **prioritas 500 item** yang punya satuan besar
+   (405 BAL/SAK/PAK/SET/RENC + ±95 item dibeli dalam DUS seperti `A591-K`)
+3. Kolom kunci dari ekspor iPOSS: nama file, nama kolom untuk kode barang, qty, harga beli, harga jual
+4. 8 nama item duplikat — apakah memang barang berbeda?
+
+**Langkah 0b — Ekspor dari iPOSS**
+
+1. Ekspor daftar barang: kode, nama, satuan, qty, harga beli, harga jual
+2. Simpan sebagai CSV; impor ke `PRICE_HISTORY` (`SOURCE = IPOSS_IMPORT`)
+3. Cocokkan `Master_Stock` ↔ iPOSS berdasarkan **nama** (karena hanya 2 item punya kode),
+   hasil pencocokan disimpan di `ITEM_MASTER.IPOS_CODE`
+4. Item yang tidak ketemu dicatat di laporan terpisah untuk dicocokkan manual
 
 **Langkah 1 — Bekukan & cadangkan**
 - Ekspor spreadsheet ke XLSX, simpan sebagai arsip bertanggal.
@@ -456,8 +598,17 @@ per `ITEM_ID` + `WH_CODE` + `BATCH_ID`. Selisih → log peringatan, bukan koreks
 - Isi `WAREHOUSE` dari 3 gudang (NGY, PCL, CRS).
 
 **Langkah 3 — Saldo awal**
+
+Karena kolom E = **total seluruh gudang** (bukan per gudang), saldo awal harus dialokasikan:
+
+| Skenario | Cara |
+|---|---|
+| Anda punya angka stok **per gudang** | Isi ledger per gudang sesuai angka tersebut |
+| Hanya ada total | **Rekomendasi:** buka opname awal per gudang (hitung fisik 3 gudang). Tidak perlu 3.875 item sekaligus — mulai dari kategori bernilai tinggi |
+| Sementara sebelum opname | Alokasikan seluruh total ke satu gudang penampung (`NGY`), beri `NOTES = "alokasi sementara, menunggu opname"`, lalu pindahkan lewat `TRANSFER` setelah dihitung |
+
 - Untuk item `TRACK_EXPIRY=N`: satu baris `STOCK_LEDGER` bertipe `ADJUST_IN`
-  dengan `REF_NO = OPENING-2026-11-18`, `NOTES = "saldo awal migrasi"`.
+  dengan `REF_NO = OPENING-2026-11-18`, `NOTES = "saldo awal migrasi"`, `QTY_BASE` = qty terkecil.
 - Untuk item `TRACK_EXPIRY=Y`: butuh batch awal. Buat `STOCK_BATCH` dengan
   `BATCH_NO = OPENING-2026-11-18` dan **expired date = perkiraan terbaik** (bila tidak diketahui,
   isi tanggal akhir tahun berjalan dan tandai `NOTES = "expired belum terverifikasi"`).
@@ -479,12 +630,13 @@ per `ITEM_ID` + `WH_CODE` + `BATCH_ID`. Selisih → log peringatan, bukan koreks
 
 | # | Deliverable | Definisi Selesai |
 |---|---|---|
-| 1.1 | Tab master baru + migrasi | Total qty saldo awal = data lama; laporan ditandatangani |
-| 1.2 | `STOCK_LEDGER` + `STOCK_BATCH` + penomoran | Mutasi tersimpan; penomoran `LGR-`/`BTC-` unik & berurutan |
-| 1.3 | GR diperluas (batch & expired) | Item `TRACK_EXPIRY=Y` tidak bisa disimpan tanpa batch+expired; ledger & batch terbentuk otomatis |
-| 1.4 | Halaman Stok Gudang + Kartu Stok | Stok per gudang cocok dengan penjumlahan ledger |
-| 1.5 | Expiry Monitor + alert | Batch H-90/H-60/H-30 muncul dan terkirim notifikasi |
-| 1.6 | Unit test + dokumentasi | `typecheck`, `test`, `build` lolos; `docs/SPREADSHEET_SCHEMA.md` diperbarui |
+| 1.1 | Tab master baru + `IPOS_CODE` + impor harga iPOSS | `PRICE_HISTORY` terisi; persentase item yang berhasil dicocokkan dilaporkan |
+| 1.2 | **Konversi satuan berjenjang** + layar Master Konversi | `1 BAL = 4 RENCENG = 40 PCS` tersimpan; endpoint `/api/units/convert` benar untuk 20 item uji |
+| 1.3 | `STOCK_LEDGER` + `STOCK_BATCH` + penomoran | Mutasi tersimpan; penomoran `LGR-`/`BTC-` unik & berurutan |
+| 1.4 | GR diperluas: satuan terima + konversi + batch/expired | Item `A591-K` 3 DUS tersimpan sebagai 90 PCS; item `TRACK_EXPIRY=Y` wajib batch+expired |
+| 1.5 | Halaman Stok Gudang + Kartu Stok | Stok per gudang cocok dengan penjumlahan `QTY_BASE` di ledger; tampil dalam 2 satuan |
+| 1.6 | Expiry Monitor + alert | Batch H-90/H-60/H-30 muncul dan terkirim notifikasi |
+| 1.7 | Unit test + dokumentasi | `typecheck`, `test`, `build` lolos; `docs/SPREADSHEET_SCHEMA.md` diperbarui |
 
 ### Fase 2 — Operasional (±3–4 minggu)
 Putaway/bin, Permintaan Divisi (+ FEFO, surat jalan), Transfer antar gudang, Barcode/QR.
@@ -497,21 +649,29 @@ Nilai persediaan, aging expiry, fast/slow moving, ABC analysis, dashboard KPI gu
 
 ---
 
-## 9. Keputusan yang Diminta dari Anda
+## 9. Status Keputusan
 
-Mohon jawab agar Fase 1 bisa langsung dieksekusi tanpa asumsi:
+### Sudah dijawab (2026-11-18)
 
-| # | Pertanyaan | Dampak bila belum dijawab |
+| # | Pertanyaan | Jawaban | Konsekuensi pada desain |
+|---|---|---|---|
+| 1 | Kolom E `Master_Stock` | Qty total **seluruh gudang**, boleh dihapus | Saldo awal harus dialokasikan per gudang; ledger jadi sumber kebenaran |
+| 2 | Harga | iPOSS = acuan harga beli & jual | Tabel `PRICE_HISTORY` + `IPOS_CODE` di `ITEM_MASTER` |
+| 3 | `TRACK_EXPIRY` 1.601 item | **Setuju** | Form GR wajib batch+expired untuk 41% item |
+| 4 | Multi-batch | Belum diputuskan; PO boleh banyak item per supplier | Form GR dibuat fleksibel: 1 baris PO = 1 batch default, tombol "tambah batch" bila perlu |
+| 5 | Konversi satuan | **Ada, dan wajib** — bisnis melayani partai besar & eceran PCS | `UNIT_CONVERSION` berjenjang; stok selalu satuan terkecil |
+| 6 | Sumber stok | iPOSS (qty satuan terkecil) | Ikut model ini: qty terkecil, bukan DUS |
+
+### Masih perlu dijawab (tidak menghalangi mulai Fase 1, tapi menghalangi rilis)
+
+| # | Pertanyaan | Dipakai untuk |
 |---|---|---|
-| 1 | Kolom **E** `Master_Stock` = stok? Gudang mana? Per tanggal? | Saldo awal salah; semua laporan ikut salah |
-| 2 | Kolom **F** = harga beli terakhir? | Nilai persediaan tidak bisa dihitung |
-| 3 | Setuju usulan `TRACK_EXPIRY=Y` untuk 1.601 item (pakan, food, obat, vaksin, jamu, DOC, hasil bumi, shampoo, desinfektan)? | Form GR tidak tahu kolom mana yang wajib |
-| 4 | Satu baris PO = satu batch, atau perlu multi-batch per item sejak awal? | Mempengaruhi rancangan form & skema |
-| 5 | Boleh menambah tab baru (6 tab) tanpa mengganggu laporan lama? | Menentukan desain migrasi |
-| 6 | Siapa role yang boleh adjustment & write-off? | Menentukan matriks hak akses |
-| 7 | Siapkan barcode di Fase 2 (printer + scanner) atau tunda? | Kecepatan opname 3.875 SKU |
-
----
+| 1 | Format ekspor iPOSS: nama file, nama kolom kode/nama/qty/harga beli/harga jual | Impor `PRICE_HISTORY` & pencocokan `IPOS_CODE` |
+| 2 | Apakah ada angka stok **per gudang**, atau hanya total? | Rencana saldo awal (§7 Langkah 3) |
+| 3 | `SHELF_LIFE_DAYS` per kategori ber-expired | Validasi saat GR & alert expiry |
+| 4 | Rantai konversi prioritas 500 item (BAL/SAK/PAK/SET/RENC + item dibeli dalam DUS) | Master Konversi |
+| 5 | Siapa role yang boleh adjustment & write-off? | Matriks hak akses Fase 3 |
+| 6 | Barcode di Fase 2 atau tunda? | Kecepatan opname 3.875 SKU |
 
 ## 10. Yang TIDAK dilakukan (sengaja)
 
