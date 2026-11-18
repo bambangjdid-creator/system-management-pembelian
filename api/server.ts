@@ -10,7 +10,6 @@ import crypto from "crypto";
 dotenv.config();
 
 import PDFDocument from "pdfkit";
-import { resolveDivisionCode, nextGrNumberFromExisting } from "./gr";
 
 const app = express();
 app.disable("x-powered-by");
@@ -41,16 +40,78 @@ function requireSecret(name: string, minimumLength = 32): string {
   return value;
 }
 
-const SPREADSHEET_ID = requireEnv("SPREADSHEET_ID");
-const GOOGLE_DRIVE_FOLDER_ID = requireEnv("GOOGLE_DRIVE_FOLDER_ID");
-const GOOGLE_DRIVE_PO_FOLDER_ID = requireEnv("GOOGLE_DRIVE_PO_FOLDER_ID");
-const TEMPLATE_PR_ID = requireEnv("TEMPLATE_PR_ID");
-const TEMPLATE_PO_ID = requireEnv("TEMPLATE_PO_ID");
+// Env config bisa gagal (variabel belum diisi). Daripada fungsi serverless mati
+// total tanpa penjelasan, simpan pesannya dan tampilkan lewat endpoint /api/health
+// + respons JSON yang jelas pada semua route /api/*.
+let CONFIG_ERROR: string | null = null;
+function loadRequiredEnv<T>(loader: () => T, fallback: T): T {
+  try {
+    return loader();
+  } catch (error: any) {
+    if (!CONFIG_ERROR) CONFIG_ERROR = error?.message || String(error);
+    console.error(`[CONFIG] ${error?.message || error}`);
+    return fallback;
+  }
+}
+
+const SPREADSHEET_ID = loadRequiredEnv(() => requireEnv("SPREADSHEET_ID"), "");
+const GOOGLE_DRIVE_FOLDER_ID = loadRequiredEnv(() => requireEnv("GOOGLE_DRIVE_FOLDER_ID"), "");
+const GOOGLE_DRIVE_PO_FOLDER_ID = loadRequiredEnv(() => requireEnv("GOOGLE_DRIVE_PO_FOLDER_ID"), "");
+const TEMPLATE_PR_ID = loadRequiredEnv(() => requireEnv("TEMPLATE_PR_ID"), "");
+const TEMPLATE_PO_ID = loadRequiredEnv(() => requireEnv("TEMPLATE_PO_ID"), "");
 // GR (Goods Receipt / Berita Acara) — optional so existing deployments keep
 // running; PDF generation is skipped gracefully when these are not set.
 const TEMPLATE_GR_ID = process.env.TEMPLATE_GR_ID?.trim() || "";
 const GOOGLE_DRIVE_GR_FOLDER_ID = process.env.GOOGLE_DRIVE_GR_FOLDER_ID?.trim() || "";
-const SESSION_SECRET = requireSecret("JWT_SECRET", 32);
+
+// --- Goods Receipt (GR) helpers -------------------------------------------------
+// Sengaja di-inline di file ini (bukan modul terpisah) karena Vercel mengompilasi
+// setiap file di folder api/ menjadi serverless function tersendiri. Import ke file
+// .ts saudara tidak disertakan ke bundel dan menyebabkan ERR_MODULE_NOT_FOUND
+// (/var/task/api/gr). Jangan ubah ini menjadi import antar-file di folder api/.
+const DIVISION_CODE_MAP: Record<string, string> = {
+  "GD NAGOYA": "NGY",
+  "GD PONCOL": "PCL",
+  "GD CIRACAS": "CRS",
+  "NAGOYA": "NGY",
+  "PONCOL": "PCL",
+  "CIRACAS": "CRS",
+};
+
+export function resolveDivisionCode(division: unknown, fallbackCode?: unknown): string {
+  const div = String(division || "").toUpperCase().trim();
+  if (div && DIVISION_CODE_MAP[div]) return DIVISION_CODE_MAP[div];
+  if (div) {
+    const matched = Object.keys(DIVISION_CODE_MAP).find((k) => div.includes(k) || k.includes(div));
+    if (matched) return DIVISION_CODE_MAP[matched];
+  }
+  const fallback = String(fallbackCode || "").toUpperCase().trim();
+  if (/^[A-Z0-9]{2,5}$/.test(fallback)) return fallback;
+  const cleaned = div.replace(/[^A-Z0-9]/g, "").slice(0, 5);
+  return cleaned || "GEN";
+}
+
+// Format: GR-[DIV_KODE]000000001-26
+export function formatGrNumber(divCode: string, num: number, yearSuffix: string): string {
+  return `GR-${divCode}${String(num).padStart(9, "0")}-${yearSuffix}`;
+}
+
+export function parseGrNumber(value: unknown): { divCode: string; num: number; yearSuffix: string } | null {
+  const match = String(value || "").match(/^GR-([A-Z0-9]+)(\d{9})-(\d{2})$/);
+  if (!match) return null;
+  return { divCode: match[1], num: parseInt(match[2], 10), yearSuffix: match[3] };
+}
+
+export function nextGrNumberFromExisting(existing: unknown[], divCode: string, yearSuffix: string): string {
+  const nums = existing.map((v) => {
+    const parsed = parseGrNumber(v);
+    if (!parsed) return 0;
+    if (parsed.divCode !== divCode || parsed.yearSuffix !== yearSuffix) return 0;
+    return parsed.num;
+  });
+  return formatGrNumber(divCode, Math.max(...nums, 0) + 1, yearSuffix);
+}
+const SESSION_SECRET = loadRequiredEnv(() => requireSecret("JWT_SECRET", 32), "");
 const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS || 8 * 60 * 60);
 const APP_BASE_URL = (process.env.APP_BASE_URL || "").replace(/\/+$/, "");
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -58,7 +119,7 @@ const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL || "";
 const GOOGLE_SCRIPT_WEB_APP_URL = process.env.GOOGLE_SCRIPT_WEB_APP_URL || "";
 
 if (!Number.isFinite(SESSION_TTL_SECONDS) || SESSION_TTL_SECONDS < 300) {
-  throw new Error("SESSION_TTL_SECONDS must be a number >= 300");
+  CONFIG_ERROR = CONFIG_ERROR || "SESSION_TTL_SECONDS must be a number >= 300";
 }
 
 if (!fs.existsSync(PDF_DIR)) {
@@ -521,7 +582,33 @@ function sanitizePublicUser(row: any[], index?: number) {
 }
 
 // Require a signed app session for every API except login and public PDF links.
+// Health check: dipakai untuk memastikan fungsi serverless hidup dan env lengkap.
+app.get("/api/health", (_req, res) => {
+  res.status(CONFIG_ERROR ? 500 : 200).json({
+    success: !CONFIG_ERROR,
+    status: CONFIG_ERROR ? "config_error" : "ok",
+    message: CONFIG_ERROR || "API berjalan normal.",
+    checks: {
+      spreadsheetId: Boolean(SPREADSHEET_ID),
+      driveFolder: Boolean(GOOGLE_DRIVE_FOLDER_ID),
+      templatePr: Boolean(TEMPLATE_PR_ID),
+      templatePo: Boolean(TEMPLATE_PO_ID),
+      sessionSecret: Boolean(SESSION_SECRET),
+      templateGr: Boolean(TEMPLATE_GR_ID),
+      driveGrFolder: Boolean(GOOGLE_DRIVE_GR_FOLDER_ID),
+    },
+  });
+});
+
 app.use("/api", (req, res, next) => {
+  if (req.path === "/health") return next();
+  if (CONFIG_ERROR) {
+    return res.status(500).json({
+      success: false,
+      status: "config_error",
+      message: `Konfigurasi server belum lengkap: ${CONFIG_ERROR}. Periksa Environment Variables di Vercel lalu redeploy.`,
+    });
+  }
   if (req.path === "/login" || req.path.startsWith("/pdf/") || req.path === "/telegram/webhook" || req.path === "/telegram/setup-webhook") return next();
   return requireSession(req, res, next);
 });
