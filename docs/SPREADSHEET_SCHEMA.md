@@ -144,3 +144,23 @@ Satu baris mewakili satu item dalam PO.
 5. Tambahkan minimal beberapa item di `Master_Stock`.
 6. Share spreadsheet ke service account dari `.env` (`GOOGLE_SERVICE_ACCOUNT_EMAIL`) sebagai Editor.
 7. Isi `SPREADSHEET_ID` di `.env` dengan ID spreadsheet tersebut.
+
+---
+
+## Spreadsheet WMS (terpisah)
+
+Sejak Fase 1 WMS, ada **spreadsheet kedua** untuk data gudang. Alasan pemisahan:
+`ITEM_MASTER` berisi 8.789 baris dan `UNIT_CONVERSION` 2.800 baris — bila digabung ke
+file ini, file operasional PR/PO ikut berat dan berisiko rusak.
+
+| | Spreadsheet PR/PO | Spreadsheet WMS |
+|---|---|---|
+| Env var | `SPREADSHEET_ID` | `WMS_SPREADSHEET_ID` |
+| Nama file | `Aplikasi Pembelian` | `WMS Database` |
+| ID | `1Ne5xeN2zEmScf9CVX5x9WguQZPM0Vk6dzQJ-n7xRfWU` | `1DdEeVwZRrPjbxkiWB_UG1O3CdWpw1W8FkkULzMWL_m4` |
+| Tab | `User_Role`, `Master_Stock`, `PR_Header`, `PR_Detail`, `PO_Header`, `PO_Detail` | `ITEM_MASTER`, `CATEGORY_MASTER`, `UNIT_CONVERSION`, `WAREHOUSE`, `STOCK_LEDGER`, `STOCK_BATCH`, `PRICE_HISTORY` |
+
+`Master_Stock` **tetap dipakai** sebagai daftar pilihan pada form PR/PO (keputusan pemilik
+sistem: dibiarkan apa adanya, hanya dibaca). `ITEM_MASTER` dipakai untuk semua logika stok.
+
+Detail struktur kolom WMS: lihat `docs/WMS_SETUP.md` dan tab `0_INFO` pada spreadsheet WMS.

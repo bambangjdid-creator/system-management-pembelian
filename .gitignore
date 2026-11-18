@@ -33,3 +33,5 @@ kayorama-debug.log
 
 # Generated code/cache
 src/dataconnect-generated/
+__pycache__/
+*.pyc
