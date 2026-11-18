@@ -28,6 +28,7 @@ const PurchaseQueue = lazy(() => import('./features/po/PurchaseQueue'));
 const ApprovalsView = lazy(() => import('./features/pr/approvals/ApprovalsView'));
 const PrForm = lazy(() => import('./features/pr/PrForm'));
 const PrList = lazy(() => import('./features/pr/PrList'));
+const StockOpeningImport = lazy(() => import('./features/wms/StockOpeningImport'));
 
 function FeatureFallback() {
   return (
@@ -628,6 +629,7 @@ export default function App() {
               {activeTab === 'approvals' && <ApprovalsView />}
               {activeTab === 'purchase-queue' && <PurchaseQueue />}
               {activeTab === 'po-form' && <PoForm />}
+              {activeTab === 'wms-opening' && <StockOpeningImport apiFetch={apiFetch} />}
               {activeTab === 'settings' && <SettingsView />}
             </AnimatePresence>
           </Suspense>

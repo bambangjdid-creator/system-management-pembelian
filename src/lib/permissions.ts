@@ -41,6 +41,7 @@ export function canSee(user: AppUser | null | undefined, menu: string) {
   if (['DASHBOARD', 'PR HISTORY', 'PO HISTORY', 'CREATE PR'].includes(menuUp)) return true;
   if (menuUp === 'APPROVAL') return isApprover(user);
   if (menuUp === 'PURCHASE') return isPurchase(user);
+  if (menuUp === 'STOK GUDANG') return true;
   if (menuUp === 'SETTINGS') return false;
 
   return false;

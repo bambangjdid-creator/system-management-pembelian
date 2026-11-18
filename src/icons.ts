@@ -20,7 +20,9 @@ import {
   Sun,
   Moon,
   Lock,
-  User
+  User,
+  Package,
+  Upload
 } from 'lucide-react';
 
 export {
@@ -45,5 +47,7 @@ export {
   Sun,
   Moon,
   Lock,
-  User
+  User,
+  Package,
+  Upload
 };

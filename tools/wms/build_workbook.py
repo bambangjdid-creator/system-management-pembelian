@@ -159,6 +159,15 @@ def build_info(wb: Workbook, stats: dict) -> None:
             c.fill = INFO_FILL
 
 
+TEMPLATE_ROWS = [
+    "ITEM_ID,ITEM_NAME,QTY,UNIT",
+    "ITM-000001,(DC) FURKIDO FLEA & TICK COLLAR FOR DOG,10,PCS",
+    "ITM-000002,(DC) BUBU IKAN LUBANG 10,5,PCS",
+    "ITM-004916,511 BRAVO (25 KG),29,KEMASAN",
+    "ITM-004945,A591-K,3,DUS",
+]
+
+
 def main() -> None:
     wb = Workbook()
     wb.remove(wb.active)
@@ -188,6 +197,29 @@ def main() -> None:
         ws = wb.create_sheet(name)
         ws.append(head)
         style_header(ws, len(head))
+
+    # Tab template agar pengguna bisa mengunduh dari spreadsheet juga.
+    ws_tpl = wb.create_sheet("TEMPLATE_UPLOAD")
+    for i, line in enumerate(TEMPLATE_ROWS, start=1):
+        for j, cell in enumerate(line.split(","), start=1):
+            ws_tpl.cell(row=i, column=j, value=cell)
+    for col in range(1, 5):
+        c = ws_tpl.cell(row=1, column=col)
+        c.fill = HEADER_FILL
+        c.font = HEADER_FONT
+    ws_tpl.column_dimensions["A"].width = 16
+    ws_tpl.column_dimensions["B"].width = 46
+    ws_tpl.column_dimensions["C"].width = 10
+    ws_tpl.column_dimensions["D"].width = 12
+    ws_tpl.cell(row=6, column=1, value="Cara pakai").font = Font(bold=True, color="1F4E78")
+    notes = [
+        "1. Salin header + isi ke Excel, atau unduh template dari menu Stok Awal Gudang.",
+        "2. ITEM_ID wajib. QTY wajib. UNIT boleh kosong (dipakai satuan dasar item).",
+        "3. UNIT harus salah satu satuan yang punya konversi untuk item itu.",
+        "4. Kolom opsional: BATCH_NO, EXPIRED, WAREHOUSE (bila satu file berisi banyak gudang).",
+    ]
+    for i, note in enumerate(notes, start=7):
+        ws_tpl.cell(row=i, column=1, value=note)
 
     wb.save(OUT)
     print(f"OK -> {OUT}  ({OUT.stat().st_size / 1_048_576:.2f} MB)")
