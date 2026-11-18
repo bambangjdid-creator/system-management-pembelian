@@ -351,14 +351,23 @@ def main() -> None:
             note_parts.append("tidak ada data konversi di iPOSS")
             stats["tanpa_konversi"] += 1
 
+        code_tag = ""
+        if not re.match(r"^SPS\d+$", item["code"]):
+            code_tag = f"kode iPOSS: {item['code']}"
+
         if item["code"] in seen_ids:
             note_parts.append("ITEM_ID duplikat di sumber")
             stats["id_duplikat"] += 1
         seen_ids.add(item["code"])
 
-        item_id = item["code"]
+        item_id = f"ITM-{idx:06d}"
+        ipos_code = "" if re.match(r"^SPS\d+$", item["code"]) else item["code"]
         if item["status"] != "Sale":
             note_parts.append(f"status iPOSS: {item['status']}")
+        if code_tag:
+            note_parts.append(code_tag)
+        if re.match(r"^SPS\d+$", item["name"]):
+            note_parts.append("NAMA_BARANG_BELUM_DIISI (masih kode)")
 
         item_rows.append(
             {
@@ -368,7 +377,7 @@ def main() -> None:
                 "SUPPLIER": item["supplier"],
                 "UNIT_BASE": unit_base,
                 "BUY_UNIT_DEFAULT": buy_unit,
-                "IPOS_CODE": item_id,
+                "IPOS_CODE": ipos_code,
                 "IPOS_NAME": item["name"],
                 "TRACK_EXPIRY": track_expiry,
                 "TRACK_BATCH": "Y" if track_expiry == "Y" else "N",
@@ -378,6 +387,10 @@ def main() -> None:
                 "REORDER_POINT": "",
                 "IS_ACTIVE": "Y" if item["status"] == "Sale" else "N",
                 "NOTES": " | ".join(note_parts),
+                "OPENING_QTY_BASE": f"{item['stock']:g}",
+                "BUY_PRICE_LAST": f"{item['cost']:g}",
+                "SELL_PRICE_REF": f"{item['price']:g}",
+                "STATUS_IPOS": item["status"],
                 "CREATED_AT": NOW,
                 "UPDATED_AT": NOW,
                 # kolom bantu (tidak masuk tab, hanya untuk laporan)
@@ -414,7 +427,9 @@ def main() -> None:
         "ITEM_ID", "ITEM_NAME", "CATEGORY", "SUPPLIER", "UNIT_BASE",
         "BUY_UNIT_DEFAULT", "IPOS_CODE", "IPOS_NAME", "TRACK_EXPIRY",
         "TRACK_BATCH", "SHELF_LIFE_DAYS", "MIN_STOCK", "MAX_STOCK",
-        "REORDER_POINT", "IS_ACTIVE", "NOTES", "CREATED_AT", "UPDATED_AT",
+        "REORDER_POINT", "IS_ACTIVE", "NOTES",
+        "OPENING_QTY_BASE", "BUY_PRICE_LAST", "SELL_PRICE_REF", "STATUS_IPOS",
+        "CREATED_AT", "UPDATED_AT",
     ]
     with (OUT_DIR / "ITEM_MASTER.csv").open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=item_cols, extrasaction="ignore")

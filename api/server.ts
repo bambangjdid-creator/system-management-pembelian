@@ -55,6 +55,10 @@ function loadRequiredEnv<T>(loader: () => T, fallback: T): T {
 }
 
 const SPREADSHEET_ID = loadRequiredEnv(() => requireEnv("SPREADSHEET_ID"), "");
+// Spreadsheet WMS terpisah (ITEM_MASTER, UNIT_CONVERSION, STOCK_LEDGER, ...).
+// Opsional: bila kosong, endpoint /api/wms/* menjawab 503 dengan pesan jelas
+// dan sisa aplikasi tetap berjalan seperti biasa.
+const WMS_SPREADSHEET_ID = process.env.WMS_SPREADSHEET_ID?.trim() || "";
 const GOOGLE_DRIVE_FOLDER_ID = loadRequiredEnv(() => requireEnv("GOOGLE_DRIVE_FOLDER_ID"), "");
 const GOOGLE_DRIVE_PO_FOLDER_ID = loadRequiredEnv(() => requireEnv("GOOGLE_DRIVE_PO_FOLDER_ID"), "");
 const TEMPLATE_PR_ID = loadRequiredEnv(() => requireEnv("TEMPLATE_PR_ID"), "");
@@ -2591,6 +2595,185 @@ app.get("/api/stock", async (req, res) => {
 });
 
 
+// --- WMS API -----------------------------------------------------------------
+// Endpoint baca untuk Fase 1. Semua memakai spreadsheet WMS terpisah.
+
+app.get("/api/wms/health", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    if (!WMS_SPREADSHEET_ID) {
+      return res.status(503).json({
+        success: false,
+        configured: false,
+        message: "WMS_SPREADSHEET_ID belum diisi. Endpoint WMS belum aktif.",
+      });
+    }
+    const sheets = getSheets(auth);
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: WMS_SPREADSHEET_ID });
+    const tabs = (meta.data.sheets || []).map((sh: any) => sh.properties?.title);
+    const missing = Object.values(WMS_TABS).filter((tab) => !tabs.includes(tab));
+    res.json({ success: true, configured: true, spreadsheetId: WMS_SPREADSHEET_ID, tabs, missing });
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_HEALTH");
+  }
+});
+
+// Daftar item WMS. Query: ?q=teks &category= &active=1 &limit= &offset=
+app.get("/api/wms/items", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const items = await loadWmsItems(auth, req.query.refresh === "1");
+    const q = safeText(req.query.q).toUpperCase();
+    const category = safeText(req.query.category).toUpperCase();
+    const onlyActive = req.query.active !== "0";
+    const limit = Math.min(Math.max(asNumber(req.query.limit) || 50, 1), 500);
+    const offset = Math.max(asNumber(req.query.offset), 0);
+
+    let filtered = items;
+    if (onlyActive) filtered = filtered.filter((i) => i.isActive);
+    if (category) filtered = filtered.filter((i) => i.category === category);
+    if (q) {
+      filtered = filtered.filter(
+        (i) =>
+          i.itemName.toUpperCase().includes(q) ||
+          i.itemId.toUpperCase().includes(q) ||
+          i.iposCode.toUpperCase().includes(q)
+      );
+    }
+
+    res.json({
+      total: filtered.length,
+      limit,
+      offset,
+      items: filtered.slice(offset, offset + limit),
+    });
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_ITEMS");
+  }
+});
+
+// Detail satu item + rantai konversinya + saldo per gudang.
+app.get("/api/wms/items/:itemId", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const itemId = cleanCode(req.params.itemId, "");
+    const items = await loadWmsItems(auth);
+    const item = items.find((i) => i.itemId.toUpperCase() === itemId);
+    if (!item) {
+      return res.status(404).json({ success: false, message: `Item ${itemId} tidak ditemukan.` });
+    }
+
+    const convRows = await wmsValues(auth, WMS_TABS.UNIT_CONVERSION);
+    const conversions = rowsToObjects(convRows)
+      .filter((row) => (row.ITEM_ID || "").toUpperCase() === itemId)
+      .map((row) => ({
+        fromUnit: row.FROM_UNIT || "",
+        toUnit: row.TO_UNIT || "",
+        toUnitQty: asNumber(row.TO_UNIT_QTY),
+        level: asNumber(row.LEVEL),
+        isActive: (row.IS_ACTIVE || "Y").toUpperCase() === "Y",
+        notes: row.NOTES || "",
+      }));
+
+    // Saldo per gudang dihitung dari ledger (append-only).
+    const ledgerRows = await wmsValues(auth, WMS_TABS.STOCK_LEDGER);
+    const balance: Record<string, number> = {};
+    for (const row of rowsToObjects(ledgerRows)) {
+      if ((row.ITEM_ID || "").toUpperCase() !== itemId) continue;
+      const wh = row.WAREHOUSE_ID || "TANPA-GUDANG";
+      balance[wh] = (balance[wh] || 0) + asNumber(row.QTY_BASE);
+    }
+
+    res.json({
+      item,
+      conversions,
+      stock: {
+        byWarehouse: balance,
+        totalBase: Object.values(balance).reduce((a, b) => a + b, 0),
+        unitBase: item.unitBase,
+      },
+    });
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_ITEM_DETAIL");
+  }
+});
+
+// Master konversi untuk layar admin. Query: ?q= &limit= &offset=
+app.get("/api/wms/conversions", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const q = safeText(req.query.q).toUpperCase();
+    const limit = Math.min(Math.max(asNumber(req.query.limit) || 100, 1), 1000);
+    const offset = Math.max(asNumber(req.query.offset), 0);
+
+    const rows = rowsToObjects(await wmsValues(auth, WMS_TABS.UNIT_CONVERSION));
+    let filtered = rows.filter((row) => (row.IS_ACTIVE || "Y").toUpperCase() === "Y");
+    if (q) {
+      filtered = filtered.filter(
+        (row) =>
+          (row.ITEM_NAME || "").toUpperCase().includes(q) ||
+          (row.ITEM_ID || "").toUpperCase().includes(q)
+      );
+    }
+    res.json({
+      total: filtered.length,
+      limit,
+      offset,
+      conversions: filtered.slice(offset, offset + limit).map((row) => ({
+        itemId: row.ITEM_ID || "",
+        itemName: row.ITEM_NAME || "",
+        fromUnit: row.FROM_UNIT || "",
+        toUnit: row.TO_UNIT || "",
+        toUnitQty: asNumber(row.TO_UNIT_QTY),
+        level: asNumber(row.LEVEL),
+        notes: row.NOTES || "",
+      })),
+    });
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_CONVERSIONS");
+  }
+});
+
+// Daftar gudang.
+app.get("/api/wms/warehouses", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const rows = rowsToObjects(await wmsValues(auth, WMS_TABS.WAREHOUSE));
+    res.json(
+      rows
+        .filter((row) => (row.IS_ACTIVE || "Y").toUpperCase() === "Y")
+        .map((row) => ({
+          warehouseId: row.WAREHOUSE_ID || "",
+          warehouseName: row.WAREHOUSE_NAME || "",
+          address: row.ADDRESS || "",
+          pic: row.PIC || "",
+        }))
+    );
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_WAREHOUSES");
+  }
+});
+
+// Daftar kategori (untuk filter & form).
+app.get("/api/wms/categories", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const rows = rowsToObjects(await wmsValues(auth, WMS_TABS.CATEGORY_MASTER));
+    res.json(
+      rows
+        .filter((row) => (row.IS_ACTIVE || "Y").toUpperCase() === "Y")
+        .map((row) => ({
+          categoryId: row.CATEGORY_ID || "",
+          categoryName: row.CATEGORY_NAME || "",
+          defaultTrackExpiry: (row.DEFAULT_TRACK_EXPIRY || "N").toUpperCase() === "Y",
+          shelfLifeDays: asNumber(row.SHELF_LIFE_DAYS),
+        }))
+    );
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_CATEGORIES");
+  }
+});
+
 // --- Normalized Google Sheets API (Header/Detail schema) ---
 // Required tabs: User_Role, Master_Stock, PR_Header, PR_Detail, PO_Header, PO_Detail
 const NORMALIZED_SHEETS = {
@@ -2651,6 +2834,97 @@ async function deleteSheetRows(auth: any, sheetName: string, rowNumbers: number[
       })),
     },
   });
+}
+
+// --- WMS: helper terpisah dengan spreadsheet sendiri -------------------------
+// Semua tab WMS berada di spreadsheet WMS_SPREADSHEET_ID, bukan SPREADSHEET_ID,
+// supaya file operasional PR/PO tidak ikut berat.
+const WMS_TABS = {
+  ITEM_MASTER: "ITEM_MASTER",
+  CATEGORY_MASTER: "CATEGORY_MASTER",
+  UNIT_CONVERSION: "UNIT_CONVERSION",
+  WAREHOUSE: "WAREHOUSE",
+  STOCK_LEDGER: "STOCK_LEDGER",
+  STOCK_BATCH: "STOCK_BATCH",
+  PRICE_HISTORY: "PRICE_HISTORY",
+} as const;
+
+function requireWmsSpreadsheet(): string {
+  if (!WMS_SPREADSHEET_ID) {
+    const error: any = new Error(
+      "Spreadsheet WMS belum dikonfigurasi. Set variabel environment WMS_SPREADSHEET_ID."
+    );
+    error.code = 503;
+    throw error;
+  }
+  return WMS_SPREADSHEET_ID;
+}
+
+async function wmsValues(auth: any, tab: string, range = "A2:Z") {
+  const sheets = getSheets(auth);
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: requireWmsSpreadsheet(),
+    range: `${tab}!${range}`,
+  });
+  return (response.data.values || []) as any[][];
+}
+
+// Ubah array-of-rows menjadi objek memakai header baris pertama.
+function rowsToObjects(rows: any[][]): Record<string, string>[] {
+  if (rows.length === 0) return [];
+  const headers = rows[0].map((h: any) => safeText(h).toUpperCase());
+  return rows
+    .slice(1)
+    .filter((row) => Array.isArray(row) && row.some((cell: any) => safeText(cell) !== ""))
+    .map((row) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((head, i) => {
+        if (head) obj[head] = safeText(row[i]);
+      });
+      return obj;
+    });
+}
+
+type WmsItem = {
+  itemId: string;
+  itemName: string;
+  category: string;
+  supplier: string;
+  unitBase: string;
+  buyUnitDefault: string;
+  iposCode: string;
+  trackExpiry: boolean;
+  shelfLifeDays: number;
+  isActive: boolean;
+};
+
+function mapWmsItem(row: Record<string, string>): WmsItem {
+  return {
+    itemId: row.ITEM_ID || "",
+    itemName: row.ITEM_NAME || "",
+    category: row.CATEGORY || "",
+    supplier: row.SUPPLIER || "",
+    unitBase: row.UNIT_BASE || "PCS",
+    buyUnitDefault: row.BUY_UNIT_DEFAULT || row.UNIT_BASE || "PCS",
+    iposCode: row.IPOS_CODE || "",
+    trackExpiry: (row.TRACK_EXPIRY || "N").toUpperCase() === "Y",
+    shelfLifeDays: asNumber(row.SHELF_LIFE_DAYS),
+    isActive: (row.IS_ACTIVE || "Y").toUpperCase() === "Y",
+  };
+}
+
+// Cache singkat: item + konversi jarang berubah, tapi mahal dibaca (8.789 baris).
+let wmsItemCache: { at: number; items: WmsItem[] } | null = null;
+const WMS_CACHE_MS = 5 * 60 * 1000;
+
+async function loadWmsItems(auth: any, force = false): Promise<WmsItem[]> {
+  if (!force && wmsItemCache && Date.now() - wmsItemCache.at < WMS_CACHE_MS) {
+    return wmsItemCache.items;
+  }
+  const rows = await wmsValues(auth, WMS_TABS.ITEM_MASTER);
+  const items = rowsToObjects(rows).map(mapWmsItem).filter((i) => i.itemId);
+  wmsItemCache = { at: Date.now(), items };
+  return items;
 }
 
 type PrHeaderRow = {
@@ -4227,5 +4501,8 @@ async function startServer() {
 if (process.env.VERCEL !== "1") {
   startServer();
 }
+
+// Diekspor agar bisa diuji unit (dipakai api/__tests__/wms.test.ts).
+export { rowsToObjects, mapWmsItem };
 
 export default app;
