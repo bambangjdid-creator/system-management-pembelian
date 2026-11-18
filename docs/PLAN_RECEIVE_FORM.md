@@ -329,3 +329,44 @@ Kode sudah mengisi placeholder berikut: `GR_NO`/`NO_GR`, `NO_PO`, `NO_PR`, `TANG
 `RECEIVE_BY`/`RECEIVED_BY`/`CHECKER_BY`, `Purchase Name`, dan baris 1–10 `NO_n`, `NAMA_BARANG_n`,
 `SATUAN_n`, `QTY_n`, `GR_n` (qty terima), `KET_n`. Placeholder yang tidak ada di template
 otomatis diabaikan, jadi template boleh diperbaiki kapan saja tanpa mengubah kode.
+
+---
+
+## 9. Perbaikan Pasca-Deploy (2026-11-18) — ERR_MODULE_NOT_FOUND
+
+### Gejala
+Setelah PR #1 merge, semua endpoint `/api/*` di Vercel membalas
+`500 FUNCTION_INVOCATION_FAILED`, termasuk URL yang tidak ada.
+
+### Penyebab
+Log Vercel:
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/api/gr'
+imported from /var/task/api/server.js
+```
+
+Vercel mengompilasi **setiap file** di folder `api/` menjadi serverless function
+tersendiri dan menjalankannya sebagai **ESM**. Import ke file `.ts` saudara
+(`import ... from "./gr"`) tidak disertakan ke bundel dan specifier tanpa ekstensi
+(legal untuk TypeScript, tidak legal untuk ESM) tidak bisa di-resolve → modul gagal
+dimuat sebelum Express sempat start → semua route 500.
+
+### Perbaikan
+1. Helper GR (`DIVISION_CODE_MAP`, `resolveDivisionCode`, `formatGrNumber`,
+   `parseGrNumber`, `nextGrNumberFromExisting`) dipindah **inline** ke `api/server.ts`.
+2. `api/gr.ts` dihapus. **Aturan baru: jangan membuat import antar-file di dalam
+   folder `api/`** (kecuali file terpisah yang memang endpoint sendiri).
+3. `api/__tests__/gr.test.ts` sekarang mengimpor `../server` secara dinamis
+   (env di-stub) sehingga yang diuji benar-benar kode yang dikirim ke production.
+4. Guard konfigurasi: env wajib yang hilang tidak lagi mematikan fungsi. Ditambah:
+   - `GET /api/health` → status + daftar env yang terisi
+   - semua route `/api/*` membalas JSON `config_error` yang menyebut nama variabel
+     yang kurang, alih-alih 500 tanpa penjelasan.
+
+### Verifikasi
+- Simulasi layout `/var/task/api` (ESM): hanya `server.js`, **nol import relatif**,
+  modul berhasil dimuat.
+- Env lengkap → `/api/health` 200, `/api/stats` 401 (normal, belum login).
+- Env kosong → `/api/health` 500 `config_error` dengan pesan jelas.
+- `typecheck`, 15 unit test, dan `build` lolos.
