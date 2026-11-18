@@ -601,7 +601,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", (req, res, next) => {
-  if (req.path === "/health") return next();
+  if (/^\/health\/?$/.test(req.path)) return next();
   if (CONFIG_ERROR) {
     return res.status(500).json({
       success: false,
