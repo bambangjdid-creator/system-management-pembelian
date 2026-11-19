@@ -27,7 +27,8 @@ export default function Sidebar({ user, activeTab, setActiveTab, canSee, googleT
         {canSee('PO HISTORY') && <SidebarItem icon={ShoppingBag} label="PO History" active={activeTab === 'po-history'} onClick={() => setActiveTab('po-history')} />}
         {canSee('PURCHASE') && <SidebarItem icon={ShoppingBag} label="Purchase Queue" active={activeTab === 'purchase-queue'} onClick={() => setActiveTab('purchase-queue')} />}
         {canSee('APPROVAL') && <SidebarItem icon={CheckCircle2} label="Approvals" active={activeTab === 'approvals'} onClick={() => setActiveTab('approvals')} />}
-        {canSee('STOK GUDANG') && <SidebarItem icon={Package} label="Stok Awal Gudang" active={activeTab === 'wms-opening'} onClick={() => setActiveTab('wms-opening')} />}
+        {canSee('STOK GUDANG') && <SidebarItem icon={Package} label="Stok Gudang" active={activeTab === 'wms-stock'} onClick={() => setActiveTab('wms-stock')} />}
+        {canSee('STOK GUDANG') && <SidebarItem icon={Upload} label="Stok Awal Gudang" active={activeTab === 'wms-opening'} onClick={() => setActiveTab('wms-opening')} />}
         {isAdmin(user) && <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />}
       </nav>
       <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-805 space-y-2">

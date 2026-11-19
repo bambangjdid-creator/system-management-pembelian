@@ -22,6 +22,7 @@ import {
   Lock,
   User,
   Package,
+  ArrowLeft,
   Upload
 } from 'lucide-react';
 
@@ -49,5 +50,6 @@ export {
   Lock,
   User,
   Package,
-  Upload
+  Upload,
+  ArrowLeft
 };
