@@ -552,12 +552,45 @@ Pilihan satuan per baris sekarang mengikuti aturan ini:
 Untuk BR11, memilih BAL berarti faktor 1 — **1 BAL tetap 1 BAL**, tidak dikali apa pun.
 Ini yang benar: satuannya memang BAL, bukan 50 PCS.
 
-## Catatan teknis: modul API dipindah
+## Catatan teknis: modul API ditempel, bukan diimpor
 
-`wms-stock.ts` dipindah dari `api/` ke `src/lib/`. Vercel memperlakukan setiap berkas di
-`api/` sebagai fungsi serverless. Berkas kedua di sana membuat deployment memiliki
-**2 fungsi**, bukan 1, dan seluruh `/api/*` menjadi 500. Sekarang `api/` hanya berisi
-`server.ts`.
+`wms-stock.ts` tinggal di `src/lib/` (dipakai test frontend), tetapi `api/server.ts`
+**tidak mengimpornya**. Isi modul ditempel langsung ke `api/server.ts` di antara dua
+penanda:
+
+```
+// Perhitungan stok WMS — SENGAJA DITEMPEL ...
+...
+// ===================== akhir modul stok WMS
+```
+
+Alasannya: Vercel **tidak** memakai `dist/server.cjs`. Vercel meng-compile `api/server.ts`
+sendiri menjadi `/var/task/api/server.js` dan hanya mengunggah folder `api/`. Berkas apa pun
+di luar `api/` (termasuk `src/lib/`) tidak ikut, sehingga `import '../src/lib/wms-stock'`
+berakhir dengan:
+
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/task/src/lib/wms-stock'
+```
+
+Itulah penyebab `/api/*` 500 pada PR #6 dan #7.
+
+**Aturan keras:** `api/` hanya boleh berisi `server.ts` dan tidak boleh punya import
+relatif. Hanya `import` dari `node_modules` yang aman.
+
+### Cara kerja sehari-hari
+
+| Perintah | Fungsi |
+|---|---|
+| `npm run wms:inline` | tempel ulang `src/lib/wms-stock.ts` ke `api/server.ts` (idempoten) |
+| `npm run verify:vercel` | tiru `/var/task`: compile per-berkas tanpa bundling, cek `/api/health` 200 & `/api/wms/stock` 401 |
+
+Dua test menjaga ini: `api/__tests__/no-relative-imports.test.ts` (menolak import relatif
+dan berkas tambahan di `api/`) dan `api/__tests__/inlined-module-sync.test.ts` (menolak
+badan tempelan yang berbeda dari `src/lib/wms-stock.ts`).
+
+`npm run build` (`vite build` + `dist/server.cjs`) tetap ada untuk pemakaian lokal, tetapi
+**bukan** bukti production sehat — jangan pakai itu untuk menyimpulkan Vercel akan lulus.
 
 ---
 
