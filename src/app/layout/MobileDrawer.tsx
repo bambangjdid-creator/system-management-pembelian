@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, CheckCircle2, FileText, LayoutDashboard, Plus, Settings, ShoppingBag, Upload, X, Package } from '../../icons';
+import { AlertTriangle, Check, CheckCircle2, Clock, FileText, LayoutDashboard, Plus, Settings, ShoppingBag, Upload, X, Package } from '../../icons';
 import SidebarItem from '../../features/components/SidebarItem';
 import { isAdmin } from '../../lib/permissions';
 import type { AppUser } from '../../lib/types';
@@ -57,6 +57,8 @@ export default function MobileDrawer({ user, activeTab, setActiveTab, canSee, go
               {canSee('APPROVAL') && <SidebarItem icon={CheckCircle2} label="Approvals" active={activeTab === 'approvals'} onClick={() => go('approvals')} />}
               {canSee('STOK GUDANG') && <SidebarItem icon={Package} label="Stok Gudang" active={activeTab === 'wms-stock'} onClick={() => go('wms-stock')} />}
               {canSee('STOK GUDANG') && <SidebarItem icon={Upload} label="Stok Awal Gudang" active={activeTab === 'wms-opening'} onClick={() => go('wms-opening')} />}
+              {canSee('STOK GUDANG') && <SidebarItem icon={Clock} label="Expiry Monitor" active={activeTab === 'wms-expiry'} onClick={() => go('wms-expiry')} />}
+              {canSee('STOK GUDANG') && <SidebarItem icon={AlertTriangle} label="Master Konversi" active={activeTab === 'wms-conversions'} onClick={() => go('wms-conversions')} />}
               {isAdmin(user) && <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => go('settings')} />}
             </nav>
             <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-850 space-y-2">

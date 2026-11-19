@@ -23,7 +23,10 @@ import {
   User,
   Package,
   ArrowLeft,
-  Upload
+  Upload,
+  AlertTriangle,
+  RefreshCw,
+  Save
 } from 'lucide-react';
 
 export {
@@ -51,5 +54,8 @@ export {
   User,
   Package,
   Upload,
-  ArrowLeft
+  ArrowLeft,
+  AlertTriangle,
+  RefreshCw,
+  Save
 };

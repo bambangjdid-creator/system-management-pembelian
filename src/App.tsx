@@ -30,6 +30,8 @@ const PrForm = lazy(() => import('./features/pr/PrForm'));
 const PrList = lazy(() => import('./features/pr/PrList'));
 const StockOpeningImport = lazy(() => import('./features/wms/StockOpeningImport'));
 const StockOverview = lazy(() => import('./features/wms/StockOverview'));
+const ExpiryMonitor = lazy(() => import('./features/wms/ExpiryMonitor'));
+const ConversionMaster = lazy(() => import('./features/wms/ConversionMaster'));
 
 function FeatureFallback() {
   return (
@@ -632,6 +634,8 @@ export default function App() {
               {activeTab === 'po-form' && <PoForm />}
               {activeTab === 'wms-stock' && <StockOverview apiFetch={apiFetch} />}
               {activeTab === 'wms-opening' && <StockOpeningImport apiFetch={apiFetch} />}
+              {activeTab === 'wms-expiry' && <ExpiryMonitor apiFetch={apiFetch} />}
+              {activeTab === 'wms-conversions' && <ConversionMaster apiFetch={apiFetch} />}
               {activeTab === 'settings' && <SettingsView />}
             </AnimatePresence>
           </Suspense>

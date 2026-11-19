@@ -634,3 +634,252 @@ export function bridgeConversionsToItems(
 
   return { byItem, stats };
 }
+
+/**
+ * Expiry Monitor — membaca STOCK_BATCH dan menghitung sisa hari.
+ *
+ * Aturan bisnis yang WAJIB dipegang:
+ * - Hanya item `TRACK_EXPIRY=Y` yang boleh masuk monitor. Stok gudang memang
+ *   berisi barang ber-expired DAN tanpa expired; batch tanpa tanggal expired
+ *   pada item ber-flag Y tetap ditampilkan sebagai "tanpa tanggal" (merah)
+ *   karena itu data yang bolong, bukan alasan menyembunyikannya.
+ * - Batch milik item `TRACK_EXPIRY=N` dibuang seluruhnya, walau tanggalnya
+ *   kebetulan terisi.
+ * - Sisa hari dihitung dari TANGGAL (bukan jam), supaya "besok" selalu 1.
+ */
+export type BatchRow = {
+  batchId: string;
+  itemId: string;
+  itemName: string;
+  warehouseId: string;
+  batchNo: string;
+  productionDate: string;
+  expiredDate: string;
+  qtyInBase: number;
+  qtyRemainBase: number;
+  unitBase: string;
+  unitCost: number;
+  supplier: string;
+  grNo: string;
+  status: string;
+};
+
+export type ExpiryStatus = "EXPIRED" | "CRITICAL" | "WARNING" | "SAFE" | "NO_DATE";
+
+export type ExpiryRow = {
+  batchId: string;
+  itemId: string;
+  itemName: string;
+  category: string;
+  warehouseId: string;
+  warehouseName: string;
+  batchNo: string;
+  expiredDate: string;
+  daysLeft: number | null;
+  status: ExpiryStatus;
+  qtyRemainBase: number;
+  unitBase: string;
+  display: string;
+  unitCost: number;
+  value: number;
+  grNo: string;
+  supplier: string;
+};
+
+/** Ambil bagian YYYY-MM-DD dari berbagai bentuk sel spreadsheet. */
+function toIsoDatePart(value: unknown): string {
+  const raw = toText(value);
+  if (!raw) return "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  // 05/31/2027 atau 31/05/2027 — tebak dari besaran angka pertama.
+  const slash = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(raw);
+  if (slash) {
+    const a = Number(slash[1]);
+    const b = Number(slash[2]);
+    const year = slash[3];
+    const month = a > 12 ? b : a;
+    const day = a > 12 ? a : b;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${year}-${pad(month)}-${pad(day)}`;
+  }
+  return "";
+}
+
+/** Selisih hari kalender: `expired` - `today`, dua-duanya YYYY-MM-DD. */
+export function daysUntil(expiredDate: string, today: string): number | null {
+  const toUtc = (iso: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(toIsoDatePart(iso));
+    if (!m) return null;
+    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  };
+  const a = toUtc(expiredDate);
+  const b = toUtc(today);
+  if (a === null || b === null) return null;
+  return Math.round((a - b) / 86400000);
+}
+
+/**
+ * Warna status berdasarkan sisa hari.
+ *
+ * Ambang dipilih agar langsung bisa ditindaklanjuti:
+ *   <= 0   EXPIRED  (merah) — sudah lewat, harus dipisah dari stok jual
+ *   <= 30  CRITICAL (merah) — sebulan lagi, jadwalkan diskon/retur
+ *   <= 90  WARNING  (kuning) — kuartal terakhir umur simpan
+ *   > 90   SAFE     (hijau)
+ *   null   NO_DATE  (merah) — item ber-expired tapi tanggalnya kosong
+ */
+export function expiryStatusFor(daysLeft: number | null, warningDays = 90, criticalDays = 30): ExpiryStatus {
+  if (daysLeft === null) return "NO_DATE";
+  if (daysLeft <= 0) return "EXPIRED";
+  if (daysLeft <= criticalDays) return "CRITICAL";
+  if (daysLeft <= warningDays) return "WARNING";
+  return "SAFE";
+}
+
+/** Baris STOCK_BATCH mentah -> objek. Nama kolom mengikuti build_workbook.py. */
+export function mapBatchRow(row: Record<string, string>): BatchRow {
+  return {
+    batchId: toText(row.BATCH_ID),
+    itemId: toText(row.ITEM_ID).toUpperCase(),
+    itemName: toText(row.ITEM_NAME),
+    warehouseId: toText(row.WAREHOUSE_ID).toUpperCase(),
+    batchNo: toText(row.BATCH_NO),
+    productionDate: toIsoDatePart(row.PRODUCTION_DATE),
+    expiredDate: toIsoDatePart(row.EXPIRED_DATE),
+    qtyInBase: toNumber(row.QTY_IN_BASE),
+    qtyRemainBase: toNumber(row.QTY_REMAIN_BASE),
+    unitBase: toText(row.UNIT_BASE).toUpperCase() || "PCS",
+    unitCost: toNumber(row.UNIT_COST),
+    supplier: toText(row.SUPPLIER),
+    grNo: toText(row.GR_NO),
+    status: toText(row.STATUS).toUpperCase() || "ACTIVE",
+  };
+}
+
+/**
+ * Bangun daftar pantau kedaluwarsa.
+ *
+ * - Sisa qty 0 dilewati: batch habis tidak perlu dipantau.
+ * - Batch non-AKTIF dilewati (sudah ditarik/rusak, ditangani terpisah).
+ * - Item TRACK_EXPIRY=N dibuang walau batch-nya bertanggal.
+ * - Diurutkan dari yang paling mendesak, batch tanpa tanggal ikut di depan
+ *   karena tidak bisa dijadwalkan sama sekali.
+ */
+export function buildExpiryMonitor(
+  batches: BatchRow[],
+  items: ItemRow[],
+  warehouses: WarehouseRow[],
+  factorsByItem: Record<string, Record<string, number>>,
+  opts: { today: string; warningDays?: number; criticalDays?: number }
+): ExpiryRow[] {
+  const warningDays = opts.warningDays && opts.warningDays > 0 ? opts.warningDays : 90;
+  const criticalDays = opts.criticalDays && opts.criticalDays > 0 ? opts.criticalDays : 30;
+
+  const itemById = new Map<string, ItemRow>();
+  for (const item of items) itemById.set(toText(item.itemId).toUpperCase(), item);
+
+  const warehouseById = new Map<string, string>();
+  for (const wh of warehouses) {
+    warehouseById.set(toText(wh.warehouseId).toUpperCase(), toText(wh.warehouseName));
+  }
+
+  const result: ExpiryRow[] = [];
+  for (const batch of batches) {
+    if (batch.qtyRemainBase <= 0) continue;
+    if (batch.status && batch.status !== "ACTIVE") continue;
+
+    const master = itemById.get(batch.itemId);
+    if (master && !master.trackExpiry) continue;
+
+    const unitBase = master?.unitBase || batch.unitBase || "PCS";
+    const daysLeft = batch.expiredDate ? daysUntil(batch.expiredDate, opts.today) : null;
+    const parts = breakdownBaseQty(batch.qtyRemainBase, factorsByItem[batch.itemId], unitBase);
+    const qty = Math.round(batch.qtyRemainBase * 1000) / 1000;
+
+    result.push({
+      batchId: batch.batchId,
+      itemId: batch.itemId,
+      itemName: master?.itemName || batch.itemName || batch.itemId,
+      category: master?.category || "",
+      warehouseId: batch.warehouseId,
+      warehouseName: warehouseById.get(batch.warehouseId) || batch.warehouseId,
+      batchNo: batch.batchNo,
+      expiredDate: batch.expiredDate,
+      daysLeft,
+      status: expiryStatusFor(daysLeft, warningDays, criticalDays),
+      qtyRemainBase: qty,
+      unitBase,
+      display: formatStockDisplay(parts, qty, unitBase),
+      unitCost: batch.unitCost,
+      value: Math.round(batch.unitCost * qty),
+      grNo: batch.grNo,
+      supplier: batch.supplier,
+    });
+  }
+
+  const rank: Record<ExpiryStatus, number> = {
+    NO_DATE: 0,
+    EXPIRED: 1,
+    CRITICAL: 2,
+    WARNING: 3,
+    SAFE: 4,
+  };
+  result.sort((a, b) => {
+    if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status];
+    if (a.daysLeft !== b.daysLeft) {
+      const av = a.daysLeft === null ? -1 : a.daysLeft;
+      const bv = b.daysLeft === null ? -1 : b.daysLeft;
+      if (av !== bv) return av - bv;
+    }
+    return a.itemName.localeCompare(b.itemName);
+  });
+  return result;
+}
+
+/** Ringkasan Expiry Monitor untuk kartu angka + filter cepat. */
+export function summarizeExpiry(rows: ExpiryRow[]) {
+  const count = (status: ExpiryStatus) => rows.filter((row) => row.status === status).length;
+  const valueOf = (from: number, to: number | null) =>
+    rows
+      .filter((row) => row.daysLeft !== null && row.daysLeft >= from && (to === null || row.daysLeft <= to))
+      .reduce((sum, row) => sum + row.value, 0);
+
+  return {
+    batches: rows.length,
+    items: new Set(rows.map((row) => row.itemId)).size,
+    expired: count("EXPIRED"),
+    critical: count("CRITICAL"),
+    warning: count("WARNING"),
+    safe: count("SAFE"),
+    noDate: count("NO_DATE"),
+    qtyBase: Math.round(rows.reduce((sum, row) => sum + row.qtyRemainBase, 0) * 1000) / 1000,
+    // Nilai barang yang harus segera ditindaklanjuti: sudah lewat s/d 30 hari lagi.
+    valueAtRisk: Math.round(valueOf(-100000, 30)),
+    valueTotal: Math.round(rows.reduce((sum, row) => sum + row.value, 0)),
+  };
+}
+
+/** Saring Expiry Monitor. `status` kosong = semua. */
+export function filterExpiry(
+  rows: ExpiryRow[],
+  opts: { q?: string; warehouseId?: string; status?: string; maxDays?: number }
+): ExpiryRow[] {
+  const q = toText(opts.q).toUpperCase();
+  const warehouseId = toText(opts.warehouseId).toUpperCase();
+  const status = toText(opts.status).toUpperCase();
+  const maxDays = Number(opts.maxDays);
+
+  return rows.filter((row) => {
+    if (warehouseId && row.warehouseId !== warehouseId) return false;
+    if (status && row.status !== status) return false;
+    if (Number.isFinite(maxDays) && maxDays > 0) {
+      if (row.daysLeft === null || row.daysLeft > maxDays) return false;
+    }
+    if (q) {
+      const haystack = `${row.itemName} ${row.itemId} ${row.batchNo} ${row.grNo} ${row.category}`.toUpperCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}

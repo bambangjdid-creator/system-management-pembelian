@@ -85,15 +85,53 @@ Google Sheets (batas ± 60 request/menit per project). Karena itu:
 - Paksa baca ulang: tambahkan `?refresh=1` pada `/api/wms/items`.
 - Konversi, gudang, dan kategori dibaca langsung (jumlah baris kecil).
 
-## 5. Yang belum dikerjakan (lanjutan Fase 1)
+## 5. Status Fase 1
 
-| # | Pekerjaan | Butuh apa |
+| # | Pekerjaan | Status |
 |---|---|---|
-| 1.3 | Tulis ke `STOCK_LEDGER` + `STOCK_BATCH` saat terima barang | Selesai desain, perlu kode transaksi |
-| 1.4 | Form Terima Barang: pilih satuan (DUS/PCS) + batch + expired | Perlu 1.2 selesai |
-| 1.5 | Halaman Stok Gudang + Kartu Stok | Perlu saldo awal masuk |
-| 1.6 | Expiry Monitor (merah/kuning/hijau) | Perlu `STOCK_BATCH` terisi |
-| 1.7 | Master Konversi (layar admin untuk sunting konversi) | Bisa jalan sekarang |
+| 1.1 | Database WMS (`WMS_Database.xlsx`) + migrasi master | Selesai |
+| 1.2 | Aturan konversi satuan bertingkat | Selesai |
+| 1.3 | Tulis ke `STOCK_LEDGER` + `STOCK_BATCH` saat terima barang | Selesai |
+| 1.4 | Form Terima Barang: pilih satuan + batch + expired | Selesai |
+| 1.5 | Halaman Stok Gudang + Kartu Stok | Selesai |
+| 1.6 | Expiry Monitor (merah/kuning/hijau) | Selesai |
+| 1.7 | Master Konversi (layar admin untuk sunting konversi) | Selesai |
+
+### 1.6 Expiry Monitor — `GET /api/wms/expiry`
+
+Membaca `STOCK_BATCH`. Hanya item `TRACK_EXPIRY=Y` yang dipantau; batch milik
+item `TRACK_EXPIRY=N` dibuang seluruhnya walau tanggalnya kebetulan terisi.
+Ini yang membuat barang tanpa expired tidak pernah muncul sebagai "bermasalah".
+
+| Sisa hari | Status | Warna |
+|---|---|---|
+| tanggal kosong | `NO_DATE` | merah |
+| ≤ 0 | `EXPIRED` | merah |
+| 1 – 30 | `CRITICAL` | oranye |
+| 31 – 90 | `WARNING` | kuning |
+| > 90 | `SAFE` | hijau |
+
+Batch dengan `QTY_REMAIN_BASE` 0 atau `STATUS` bukan `ACTIVE` tidak ditampilkan.
+Urutan tabel: `NO_DATE` → `EXPIRED` → `CRITICAL` → `WARNING` → `SAFE`, jadi yang
+paling tidak bisa dijadwalkan selalu di atas.
+
+### 1.7 Master Konversi — `GET /api/wms/conversions`, `PUT /api/wms/conversions/:convId`
+
+Layar admin untuk memeriksa `UNIT_CONVERSION`. Setiap baris ditampilkan bersama
+**satuan efektif** dan **faktor ke satuan dasar**, sehingga salah tafsir
+multipak langsung kelihatan: `@5 SAK` dengan `Qty/ = 3` tampil sebagai
+`@5 → 15 SAK`.
+
+Kolom yang bisa disunting: `FROM_UNIT`, `TO_UNIT`, `TO_UNIT_QTY`, `IS_ACTIVE`,
+`NOTES`. Penulisan dilakukan per-baris memakai `CONV_ID` (bukan tulis ulang
+seluruh tab) supaya aman bila ada pengguna lain di sheet.
+
+Ditolak sebelum menyimpan: satuan kosong, `TO_UNIT_QTY` ≤ 0, dan relasi 1:1
+(`SAK -> SAK` dengan qty 1, yang tidak mengubah apa pun).
+
+Setelah menyimpan, cache saldo dan cache batch dibatalkan paksa. Cache itu
+berkunci **jumlah baris**, sehingga perubahan isi tidak otomatis
+membatalkannya.
 
 ## 6. Hal yang menunggu keputusan pemilik sistem
 
@@ -669,3 +707,19 @@ Kode sudah siap, tetapi datanya belum. Jadi sampai spreadsheet diperbarui:
 
 Untuk mengaktifkannya, `Master Data Konversi.xlsx` perlu dibangun ulang dengan
 script yang sudah diperbaiki, lalu workbook-nya di-upload ulang.
+
+Layar **Master Konversi** (`Master Konversi` di sidebar) menampilkan hitungan
+`baris multipak @N` di kartu atas. Selama angkanya masih **0**, berarti
+workbook belum diperbarui — kode sudah siap, datanya belum.
+
+Untuk item yang jumlahnya sedikit, baris `@N` bisa ditambahkan manual lewat
+layar tersebut (tombol pensil). Untuk seluruh katalog, bangun ulang workbook:
+
+```bash
+# setelah Master Data Konversi.xlsx ada di google_drive/
+python3 tools/wms/build_masters.py
+python3 tools/wms/build_workbook.py
+```
+
+lalu unggah `WMS_Database.xlsx` ke Google Drive dan salin isinya ke spreadsheet
+WMS (`WMS_SPREADSHEET_ID`).
