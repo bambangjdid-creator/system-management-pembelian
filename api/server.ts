@@ -4656,7 +4656,11 @@ function requireWmsSpreadsheet(): string {
   return WMS_SPREADSHEET_ID;
 }
 
-async function wmsValues(auth: any, tab: string, range = "A2:Z") {
+// Rentang WAJIB mulai dari baris 1: rowsToObjects() memakai elemen pertama
+// sebagai header. Dulu default-nya "A2:Z" sehingga baris 1 (header asli)
+// terbuang dan baris data pertama dipakai sebagai header — akibatnya semua
+// kolom terbaca kosong dan setiap tab tampak berisi 0 baris.
+async function wmsValues(auth: any, tab: string, range = "A1:Z") {
   const sheets = getSheets(auth);
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: requireWmsSpreadsheet(),
@@ -4666,6 +4670,7 @@ async function wmsValues(auth: any, tab: string, range = "A2:Z") {
 }
 
 // Ubah array-of-rows menjadi objek memakai header baris pertama.
+// Pemanggil harus mengirim rentang yang menyertakan baris header (A1:Z).
 function rowsToObjects(rows: any[][]): Record<string, string>[] {
   if (rows.length === 0) return [];
   const headers = rows[0].map((h: any) => safeText(h).toUpperCase());
