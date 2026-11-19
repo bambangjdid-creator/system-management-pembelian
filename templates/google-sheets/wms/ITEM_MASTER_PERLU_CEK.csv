@@ -21,7 +21,7 @@ ITM-000019,(DC) MICHIO CHOYA,UMPAN PANCING,PCS,PCS,0,Discontinue,1,status iPOSS:
 ITM-000020,(DC) REEL MAGURO BREAM 2000,REEL PANCING,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000021,(DC) REEL MAGURO PACU 3000,REEL PANCING,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000022,(DC) 201M (1 KG),PAKAN AYAM REPACK,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
-ITM-000023,(DC) 201M (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Discontinue,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-000023,(DC) 201M (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Discontinue,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-000024,(DC) 201M (50 KG),PAKAN AYAM BROILER,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000025,(DC) 220 VOLT ON FIRE LB (48),PAKAN BURUNG BAG,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-000026,(DC) 220 VOLT PLECI (100),PAKAN BURUNG BAG,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
@@ -185,12 +185,12 @@ ITM-000183,(DC) BARK SHAMPO LAVENDER 415 ML,SHAMPOO PARFUM PET,PCS,PCS,0,Discont
 ITM-000184,(DC) BATOK (B),CANGKIR BURUNG,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-000185,(DC) BATU AS ROUND 4 INCH,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000186,(DC) BATU AS ROUND 5 INCH,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
-ITM-000187,(DC) BATU AS-3 LAYER,PERLENGKAPAN TERNAK IKAN,LUSIN,PCS,0,Discontinue,2,konflik: LUSIN tidak terhubung ke PCS | UNIT_BASE disesuaikan dari LUSIN ke PCS (iPOSS) | status iPOSS: Discontinue
-ITM-000188,(DC) BATU AS-3 LAYER,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,konflik: LUSIN tidak terhubung ke PCS | status iPOSS: Discontinue
-ITM-000189,(DC) BATU AS-5 LAYER,PERLENGKAPAN TERNAK IKAN,LUSIN,PCS,0,Discontinue,2,konflik: LUSIN tidak terhubung ke PCS | UNIT_BASE disesuaikan dari LUSIN ke PCS (iPOSS) | status iPOSS: Discontinue
-ITM-000190,(DC) BATU AS-5 LAYER,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,konflik: LUSIN tidak terhubung ke PCS | status iPOSS: Discontinue
-ITM-000191,(DC) BATU AS-D-1.5 L2 MULTI,PERLENGKAPAN TERNAK IKAN,LUSIN,PCS,0,Discontinue,2,konflik: LUSIN tidak terhubung ke PCS | UNIT_BASE disesuaikan dari LUSIN ke PCS (iPOSS) | status iPOSS: Discontinue
-ITM-000192,(DC) BATU AS-D-1.5 L2 MULTI,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,konflik: LUSIN tidak terhubung ke PCS | status iPOSS: Discontinue
+ITM-000187,(DC) BATU AS-3 LAYER,PERLENGKAPAN TERNAK IKAN,LUSIN,PCS,0,Discontinue,2,UNIT_BASE disesuaikan dari LUSIN ke PCS (iPOSS) | status iPOSS: Discontinue
+ITM-000188,(DC) BATU AS-3 LAYER,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
+ITM-000189,(DC) BATU AS-5 LAYER,PERLENGKAPAN TERNAK IKAN,LUSIN,PCS,0,Discontinue,2,UNIT_BASE disesuaikan dari LUSIN ke PCS (iPOSS) | status iPOSS: Discontinue
+ITM-000190,(DC) BATU AS-5 LAYER,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
+ITM-000191,(DC) BATU AS-D-1.5 L2 MULTI,PERLENGKAPAN TERNAK IKAN,LUSIN,PCS,0,Discontinue,2,UNIT_BASE disesuaikan dari LUSIN ke PCS (iPOSS) | status iPOSS: Discontinue
+ITM-000192,(DC) BATU AS-D-1.5 L2 MULTI,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
 ITM-000193,(DC) BATU AS-LY29-3-3 INCH,PERLENGKAPAN TERNAK IKAN,@3,PCS,0,Discontinue,2,status iPOSS: Discontinue
 ITM-000194,(DC) BATU AS-LY29-3-3 INCH,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
 ITM-000195,(DC) BATU AS-LY29-4-4 INCH,PERLENGKAPAN TERNAK IKAN,@3,PCS,0,Discontinue,2,status iPOSS: Discontinue
@@ -386,7 +386,7 @@ ITM-000384,(DC) BUG OFF PENGHILANG BAU,OBAT CAT,PCS,PCS,0,Discontinue,5,status i
 ITM-000385,(DC) BUNGKUS PARUH,PERLENGKAPAN TERNAK AYAM,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-000386,(DC) BUR 4,PAKAN BURUNG BAG,KG,KG,0,Discontinue,2,status iPOSS: Discontinue
 ITM-000387,(DC) BURAS BMS (1 KG),PAKAN AYAM REPACK,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
-ITM-000388,(DC) BURAS BMS (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Discontinue,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-000388,(DC) BURAS BMS (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Discontinue,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-000389,(DC) BURAS BMS (50 KG),PAKAN AYAM BURAS,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000390,(DC) BUSA AQUAFRESH KOTAK,PERLENGKAPAN TERNAK IKAN,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000391,(DC) BUSA GAGANG JORAN 40 CM,AKSESORIS PANCING LAIN,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
@@ -459,7 +459,7 @@ ITM-000457,(DC) CATZ KITCHEN 15 GR,CAT FOOD MILK DAN SNACK,PCS,PCS,0,Discontinue
 ITM-000458,(DC) CAVIA DROPS 30 cc,OBAT CAT,PCS,PCS,0,Discontinue,5,status iPOSS: Discontinue
 ITM-000459,(DC) CAVIA M 30 cc,OBAT CAT,PCS,PCS,0,Discontinue,5,status iPOSS: Discontinue
 ITM-000460,(DC) CB11 (50 KG),PAKAN AYAM BROILER,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
-ITM-000461,(DC) CB12 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Discontinue,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-000461,(DC) CB12 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Discontinue,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-000462,(DC) CB12 (50 KG),PAKAN AYAM BROILER,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000463,(DC) CBR 1 PLUS (50 KG),PAKAN AYAM BROILER,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
 ITM-000464,(DC) CCKITTEN 20KG (@1 KG),CAT FOOD DRY SAK,PCS,PCS,0,Discontinue,6,status iPOSS: Discontinue
@@ -1278,7 +1278,7 @@ ITM-001276,(DC) IZZY KUTU SPRAY 30ML,OBAT CAT,PCS,PCS,0,Discontinue,4,status iPO
 ITM-001277,(DC) IZZY MEDICATED SPRAY 30ML,OBAT CAT,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-001278,(DC) JAGO - NCIR IL,OBAT CAT,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-001279,(DC) JAGUNG CAMPUR (50 KG),HASIL BUMI LOKAL BURUNG,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
-ITM-001280,(DC) JAGUNG HIBRIDA (25 KG),HASIL BUMI LOKAL AYAM,@25 Kg,KG,0,Discontinue,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-001280,(DC) JAGUNG HIBRIDA (25 KG),HASIL BUMI LOKAL AYAM,@25 Kg,KG,0,Discontinue,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-001281,(DC) JAGUNG PECAH CPT (50 KG),HASIL BUMI LOKAL AYAM,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
 ITM-001282,(DC) JAGUNG PECAH SUPER (25 KG),HASIL BUMI LOKAL AYAM,SAK,SAK,0,Discontinue,1,status iPOSS: Discontinue
 ITM-001283,(DC) JAGUNG SUPER A,HASIL BUMI LOKAL BURUNG,SAK,SAK,0,Discontinue,1,status iPOSS: Discontinue
@@ -1855,7 +1855,7 @@ ITM-001853,(DC) KATULAMPA WANGI,UMPAN PANCING,PCS,PCS,0,Discontinue,3,status iPO
 ITM-001854,(DC) KAWAN CAT LITTER 10 L (ISI 3),PASIR KUCING WANGI 10L,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-001855,(DC) KAWAN CAT LITTER 20 KG,PASIR KUCING WANGI 25 L,SAK,SAK,0,Discontinue,3,status iPOSS: Discontinue
 ITM-001856,(DC) KAWAN CAT LITTER 5 L (ISI 6),PASIR KUCING WANGI 5L,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
-ITM-001857,(DC) KAWAT TEBOK PLASTIK,AKSESORIS BURUNG LAIN,@3,PCS,0,Discontinue,1,satuan '@3' = 1 paket isi 3 PCS | status iPOSS: Discontinue
+ITM-001857,(DC) KAWAT TEBOK PLASTIK,AKSESORIS BURUNG LAIN,@3,PCS,0,Discontinue,1,tidak ada satuan dasar yang bisa ditentukan | status iPOSS: Discontinue
 ITM-001858,(DC) KD HAMSTER - 511,KANDANG PET,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-001859,(DC) KD HAMSTER - 520 M004H,KANDANG PET,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-001860,(DC) KD HAMSTER - 825 M002,KANDANG PET,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
@@ -2568,7 +2568,7 @@ ITM-002566,(DC) PAKAN LELE LA7K-3 (30 Kg),PAKAN IKAN LELE,BAL,BAL,0,Discontinue,
 ITM-002567,(DC) PAKAN LOLOHAN TROTOL EBOD,PAKAN BURUNG BAG,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-002568,(DC) PAKAN LOLOHAN U2,PAKAN BURUNG BAG,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-002569,(DC) PAKAN LOMBA DEWA MABOK (SALE),PRODUK PROMOSI,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
-ITM-002570,(DC) PAKAN MERAK,HASIL BUMI LOKAL BURUNG,@1 Kg,KG,0,Discontinue,2,satuan '@1 Kg' dibaca sebagai KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-002570,(DC) PAKAN MERAK,HASIL BUMI LOKAL BURUNG,@1 Kg,KG,0,Discontinue,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-002571,(DC) PAKAN NGECOR,PAKAN BURUNG BAG,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-002572,(DC) PAKET CUTTY,PRODUK PROMOSI,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-002573,(DC) PAKET INHOUSE,PRODUK PROMOSI,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
@@ -2984,7 +2984,7 @@ ITM-002982,(DC) PROPLAN 8 KG - KITTEN STARTER,CAT FOOD DRY SAK,SAK,SAK,0,Discont
 ITM-002983,(DC) PROPLAN 85 GR (ADULT 7+) - CHICKEN,CAT FOOD WET POUCH,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-002984,(DC) PROVIT BURUNG,OBAT BURUNG,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-002985,(DC) PULUT BOTOL BANG FANDI,OBAT BURUNG,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
-ITM-002986,(DC) PUR BURUNG HBK-01,PAKAN BURUNG BAG,@25 Kg,KG,0,Discontinue,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-002986,(DC) PUR BURUNG HBK-01,PAKAN BURUNG BAG,@25 Kg,KG,0,Discontinue,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-002987,(DC) PUR BURUNG HBK-01 (1 KG),PAKAN BURUNG REPACK,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-002988,(DC) PUR BURUNG HBK-01 (50 KG),PAKAN BURUNG SAK,BAL,BAL,0,Discontinue,1,status iPOSS: Discontinue
 ITM-002989,(DC) PURINA ONE 1.2KG - ADULT SALMON&TUNA,CAT FOOD DRY BAG,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
@@ -4096,8 +4096,8 @@ ITM-004094,(DC) SNKI 5 (M) (12),PAKAN IKAN HIAS AQUARIUM,PCS,PCS,0,Discontinue,4
 ITM-004095,(DC) SNKI 5 WHEAT GERM,PAKAN IKAN HIAS AQUARIUM,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-004096,(DC) SNOT CURE (KITOLOT),OBAT BURUNG,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-004097,(DC) SNOT PLUS,OBAT AYAM,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
-ITM-004098,(DC) SP30-3,PAKAN IKAN NILA MAS GURAME,BAL,KG,0,Discontinue,2,konflik: BAL tidak terhubung ke KG | UNIT_BASE disesuaikan dari BAL ke KG (iPOSS) | status iPOSS: Discontinue
-ITM-004099,(DC) SP30-3,PAKAN IKAN NILA MAS GURAME,KG,KG,0,Discontinue,2,konflik: BAL tidak terhubung ke KG | status iPOSS: Discontinue
+ITM-004098,(DC) SP30-3,PAKAN IKAN NILA MAS GURAME,BAL,KG,0,Discontinue,2,UNIT_BASE disesuaikan dari BAL ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-004099,(DC) SP30-3,PAKAN IKAN NILA MAS GURAME,KG,KG,0,Discontinue,2,status iPOSS: Discontinue
 ITM-004100,(DC) SPA - TEAR STAIN REMOVER 236ML,OBAT CAT,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
 ITM-004101,(DC) SPET 5 ML,AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-004102,(DC) SPET 60 ML,AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
@@ -4147,8 +4147,8 @@ ITM-004145,(DC) STAINLESS BOWL W/ HANGER - 320,TEMPAT MAKAN MINUM PET,PCS,PCS,0,
 ITM-004146,(DC) STARBIO,OBAT AYAM,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-004147,(DC) STARLIT RUBBER FROG,AKSESORIS PANCING LAIN,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
 ITM-004148,(DC) STARRY CAT REPACK 0.5 KG,CAT FOOD REPACK,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
-ITM-004149,(DC) STICK WARNA,AKSESORIS PET LAIN,PAK,PCS,0,Discontinue,2,konflik: PAK tidak terhubung ke PCS | UNIT_BASE disesuaikan dari PAK ke PCS (iPOSS) | status iPOSS: Discontinue
-ITM-004150,(DC) STICK WARNA,AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,2,konflik: PAK tidak terhubung ke PCS | status iPOSS: Discontinue
+ITM-004149,(DC) STICK WARNA,AKSESORIS PET LAIN,PAK,PCS,0,Discontinue,2,UNIT_BASE disesuaikan dari PAK ke PCS (iPOSS) | status iPOSS: Discontinue
+ITM-004150,(DC) STICK WARNA,AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,2,status iPOSS: Discontinue
 ITM-004151,(DC) STOP KUTU,DESINFEKTAN DAN PESTISIDA,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-004152,(DC) STOPER DAIDO BLACK UK L,AKSESORIS PANCING LAIN,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-004153,(DC) STOPER DAIDO BULAT BLACK ALL SIZE,AKSESORIS PANCING LAIN,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
@@ -4437,7 +4437,7 @@ ITM-004435,(DC) TEXAS COMBAT (VITAMIN AYAM VIETNAM),OBAT AYAM,PCS,PCS,0,Disconti
 ITM-004436,(DC) THE BEST HAICO,UMPAN PANCING,RENC,RENC,0,Discontinue,3,status iPOSS: Discontinue
 ITM-004437,(DC) THERMOMETER PETS,AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-004438,(DC) TIEH TA WAN KAPSUL (12),OBAT AYAM,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
-ITM-004439,(DC) TIMAH LAUT J1,AKSESORIS PANCING LAIN,@0.5 Kg,KG,0,Discontinue,2,satuan iPOSS '@0.5 Kg': 1 kemasan = 0.5 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
+ITM-004439,(DC) TIMAH LAUT J1,AKSESORIS PANCING LAIN,@0.5 Kg,KG,0,Discontinue,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS) | status iPOSS: Discontinue
 ITM-004440,(DC) TINOLIN INJECTION 100 ML,OBAT AYAM,PCS,PCS,0,Discontinue,4,status iPOSS: Discontinue
 ITM-004441,(DC) TIRAI KANDANG 70CM,AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
 ITM-004442,(DC) TISSUE BASAH A (PAK 2),AKSESORIS PET LAIN,PCS,PCS,0,Discontinue,1,status iPOSS: Discontinue
@@ -4893,42 +4893,42 @@ ITM-004891,(DC)TON NASA (24),OBAT IKAN,PCS,PCS,0,Discontinue,4,status iPOSS: Dis
 ITM-004892,(DC)WHKSPOUCH 80GR - MACKEREL SENIOR (7+),CAT FOOD DRY BAG,PCS,PCS,0,Discontinue,6,status iPOSS: Discontinue
 ITM-004893,(DC)WHKSPOUCH 80GR - TUNA SENIOR (7+),CAT FOOD DRY BAG,PCS,PCS,0,Discontinue,6,status iPOSS: Discontinue
 ITM-004894,(DC)YUNNAN PAIYAO CAPS,OBAT AYAM,PCS,PCS,0,Discontinue,3,status iPOSS: Discontinue
-ITM-004896,105 M (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,18,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004911,310 CR (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004916,511 BRAVO (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,29,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004920,512 BRAVO (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,17,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004923,551 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004925,594 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004928,781 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,17,Sale,1,satuan iPOSS '@15 Kg': 1 kemasan = 15 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004933,781-2 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,9,Sale,1,satuan iPOSS '@15 Kg': 1 kemasan = 15 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-004938,782-4 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,8,Sale,1,satuan iPOSS '@15 Kg': 1 kemasan = 15 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004896,105 M (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,18,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004911,310 CR (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,0,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004916,511 BRAVO (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,29,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004920,512 BRAVO (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,17,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004923,551 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004925,594 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004928,781 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,17,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004933,781-2 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,9,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-004938,782-4 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,8,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
 ITM-005147,BOLT DOG 20KG - BEEF (CURAH),DOG FOOD DRY SAK,SAK,SAK,0,Sale,0,tidak ada data konversi di iPOSS
 ITM-005148,BOLT DOG 20KG - LAMB (CURAH),DOG FOOD DRY SAK,SAK,SAK,0,Sale,0,tidak ada data konversi di iPOSS
-ITM-005233,BR2 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,12,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005235,BR21 MERAH (25 KG),PAKAN AYAM BROILER,@25 Kg,KG,6,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005238,BR21E (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005565,EKO-3 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,7,Sale,1,satuan iPOSS '@15 Kg': 1 kemasan = 15 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005568,EKO-4 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,9,Sale,1,satuan iPOSS '@15 Kg': 1 kemasan = 15 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005669,GABAH KECIL PUTIH 25 KG,HASIL BUMI LOKAL BURUNG,@25 Kg,KG,0,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005671,GABAH MERAH 25 KG,HASIL BUMI LOKAL AYAM,@25 Kg,KG,54,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005760,GENTA GT-1 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,21,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005939,JAGUNG PECAH 25 KG,HASIL BUMI LOKAL AYAM,@25 Kg,KG,180,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-005993,JERUJI FIBER HITAM 1 mm,AKSESORIS BURUNG LAIN,@100,PCS,0,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-005994,JERUJI FIBER HITAM 1.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,6,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-005995,JERUJI FIBER HITAM 2 mm,AKSESORIS BURUNG LAIN,@100,PCS,13,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-005996,JERUJI FIBER HITAM 2.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,8,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-005997,JERUJI FIBER HITAM 3 mm,AKSESORIS BURUNG LAIN,@100,PCS,2,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-005998,JERUJI FIBER PUTIH 1 mm,AKSESORIS BURUNG LAIN,@100,PCS,3,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-005999,JERUJI FIBER PUTIH 1.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,12,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-006000,JERUJI FIBER PUTIH 2 mm,AKSESORIS BURUNG LAIN,@100,PCS,28,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-006001,JERUJI FIBER PUTIH 2.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,14,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-006002,JERUJI FIBER PUTIH 3 mm,AKSESORIS BURUNG LAIN,@100,PCS,0,Sale,3,satuan '@100' = 1 paket isi 100 PCS
-ITM-006176,KATUL KW 25 KG,HASIL BUMI LOKAL AYAM,@25 Kg,KG,12,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-007015,P02 PELLET (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005233,BR2 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,12,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005235,BR21 MERAH (25 KG),PAKAN AYAM BROILER,@25 Kg,KG,6,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005238,BR21E (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005565,EKO-3 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,7,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005568,EKO-4 (15 KG),PAKAN IKAN REPACK,@15 Kg,KG,9,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005669,GABAH KECIL PUTIH 25 KG,HASIL BUMI LOKAL BURUNG,@25 Kg,KG,0,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005671,GABAH MERAH 25 KG,HASIL BUMI LOKAL AYAM,@25 Kg,KG,54,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005760,GENTA GT-1 (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,21,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005939,JAGUNG PECAH 25 KG,HASIL BUMI LOKAL AYAM,@25 Kg,KG,180,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-005993,JERUJI FIBER HITAM 1 mm,AKSESORIS BURUNG LAIN,@100,PCS,0,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-005994,JERUJI FIBER HITAM 1.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,6,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-005995,JERUJI FIBER HITAM 2 mm,AKSESORIS BURUNG LAIN,@100,PCS,13,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-005996,JERUJI FIBER HITAM 2.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,8,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-005997,JERUJI FIBER HITAM 3 mm,AKSESORIS BURUNG LAIN,@100,PCS,2,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-005998,JERUJI FIBER PUTIH 1 mm,AKSESORIS BURUNG LAIN,@100,PCS,3,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-005999,JERUJI FIBER PUTIH 1.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,12,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-006000,JERUJI FIBER PUTIH 2 mm,AKSESORIS BURUNG LAIN,@100,PCS,28,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-006001,JERUJI FIBER PUTIH 2.5 mm,AKSESORIS BURUNG LAIN,@100,PCS,14,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-006002,JERUJI FIBER PUTIH 3 mm,AKSESORIS BURUNG LAIN,@100,PCS,0,Sale,3,tidak ada satuan dasar yang bisa ditentukan
+ITM-006176,KATUL KW 25 KG,HASIL BUMI LOKAL AYAM,@25 Kg,KG,12,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-007015,P02 PELLET (25 KG),PAKAN AYAM REPACK,@25 Kg,KG,5,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
 ITM-007354,PUYUH P100 (50 KG),PAKAN PUYUH,BAL,BAL,8,Sale,0,tidak ada data konversi di iPOSS
-ITM-008076,SOTONG BESAR,PAKAN BURUNG BAG,@0.5 Kg,KG,0,Sale,2,satuan iPOSS '@0.5 Kg': 1 kemasan = 0.5 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-008079,SOTONG SEDANG,PAKAN BURUNG BAG,@0.5 Kg,KG,107,Sale,2,satuan iPOSS '@0.5 Kg': 1 kemasan = 0.5 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-008451,TIMAH BULAT K NO.0,AKSESORIS PANCING LAIN,@0.5 Kg,KG,3,Sale,2,satuan iPOSS '@0.5 Kg': 1 kemasan = 0.5 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-008452,TIMAH CAMPUR,AKSESORIS PANCING LAIN,@0.5 Kg,KG,452,Sale,2,satuan iPOSS '@0.5 Kg': 1 kemasan = 0.5 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-008456,TIMAH PASIR,AKSESORIS PANCING LAIN,@0.5 Kg,KG,17,Sale,2,satuan iPOSS '@0.5 Kg': 1 kemasan = 0.5 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
-ITM-008568,TURBO 521 BURUNG (25 KG),PAKAN BURUNG REPACK,@25 Kg,KG,6,Sale,1,satuan iPOSS '@25 Kg': 1 kemasan = 25 KG. PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG | UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-008076,SOTONG BESAR,PAKAN BURUNG BAG,@0.5 Kg,KG,0,Sale,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-008079,SOTONG SEDANG,PAKAN BURUNG BAG,@0.5 Kg,KG,107,Sale,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-008451,TIMAH BULAT K NO.0,AKSESORIS PANCING LAIN,@0.5 Kg,KG,3,Sale,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-008452,TIMAH CAMPUR,AKSESORIS PANCING LAIN,@0.5 Kg,KG,452,Sale,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-008456,TIMAH PASIR,AKSESORIS PANCING LAIN,@0.5 Kg,KG,17,Sale,2,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)
+ITM-008568,TURBO 521 BURUNG (25 KG),PAKAN BURUNG REPACK,@25 Kg,KG,6,Sale,1,UNIT_BASE disesuaikan dari PCS ke KG (iPOSS)

@@ -18,6 +18,12 @@ import PDFDocument from "pdfkit";
 // ===========================================================================
 
 // ===========================================================================
+
+// ===========================================================================
+
+// ===========================================================================
+
+// ===========================================================================
 // Perhitungan stok WMS — SENGAJA DITEMPEL DI SINI, BUKAN DIIMPOR.
 //
 // Vercel meng-compile api/server.ts sendiri menjadi /var/task/api/server.js
@@ -121,9 +127,9 @@ const wmsToText = (value: unknown): string => String(value ?? "").trim();
  */
 function parseMultiPackLabel(label: string): { qty: number; unit: string } | null {
   const raw = wmsToText(label).toUpperCase();
-  const match = /^@\s*(\d+)\s*([A-Z]*)$/.exec(raw);
+  const match = /^@\s*(\d+(?:[.,]\d+)?)\s*([A-Z]*)$/.exec(raw);
   if (!match) return null;
-  const qty = Number(match[1]);
+  const qty = Number(match[1].replace(",", "."));
   if (!Number.isFinite(qty) || qty <= 0) return null;
   return { qty, unit: match[2] || "" };
 }
@@ -131,104 +137,184 @@ function parseMultiPackLabel(label: string): { qty: number; unit: string } | nul
 function buildUnitFactors(
   conversions: ConversionRow[]
 ): Record<string, Record<string, number>> {
-  const result: Record<string, Record<string, number>> = {};
   const byItem: Record<string, ConversionRow[]> = {};
-
   for (const row of conversions) {
     const itemId = wmsToText(row.itemId).toUpperCase();
-    const rawFrom = wmsToText(row.fromUnit).toUpperCase();
-    const to = wmsToText(row.toUnit).toUpperCase();
-    let factor = wmsToNumber(row.toUnitQty);
-    if (!itemId || !rawFrom || !to || factor <= 0) continue;
+    const from = wmsToText(row.fromUnit).toUpperCase();
+    if (!itemId || !from) continue;
     if (row.isActive === false) continue;
-
-    // "@5 SAK" dengan Qty/=3 berarti 3 x 5 = 15 SAK, bukan 3.
-    // Satuan tetap dibaca sebagai SAK supaya rantainya menyatu dengan
-    // baris level 1 ("SAK" 1 SAK) dan tidak muncul satuan palsu "@5 SAK".
-    let from = rawFrom;
-    const multi = parseMultiPackLabel(rawFrom);
-    if (multi) {
-      factor = factor * multi.qty;
-      from = multi.unit || to;
-    }
-
-    if (from === to && factor === 1) continue;
-
     (byItem[itemId] = byItem[itemId] || []).push({
       ...row,
       fromUnit: from,
-      toUnit: to,
-      toUnitQty: factor,
+      toUnit: wmsToText(row.toUnit).toUpperCase(),
+      toUnitQty: wmsToNumber(row.toUnitQty),
     });
   }
 
+  const result: Record<string, Record<string, number>> = {};
   for (const [itemId, rows] of Object.entries(byItem)) {
     result[itemId] = resolveFactors(rows);
   }
-
   return result;
 }
 
 /**
  * Hitung faktor setiap satuan ke SATUAN DASAR dari relasi master data.
  *
- * Aturan master data (iPOSS -> UNIT_CONVERSION):
- *   1 [FROM_UNIT] = TO_UNIT_QTY [TO_UNIT]
+ * ATURAN TUNGGAL (sudah diverifikasi ke 8.788 item di Master Data Konversi):
  *
- * Perhatikan kolom-kolom iPOSS aslinya:
- *   Satuan | Qty/ | Paket
- *   BAL    | 1    | BAL      -> BAL adalah satuan terkecil sekaligus satuan transaksi
- *   SAK    | 3    | SAK      -> 1 transaksi SAK = 3 paket SAK
- *   Kg     | 25   | BAL      -> 1 BAL = 25 Kg, jadi Kg LEBIH KECIL dari BAL
+ *     1 [FROM_UNIT] = TO_UNIT_QTY [TO_UNIT]
  *
- * Jadi satuan dasar tidak boleh ditebak dari nama, dan BAL/SAK tidak otomatis
- * dianggap satuan besar. Yang menentukan adalah arah relasi: satuan yang selalu
- * muncul sebagai To (tidak pernah sebagai From) adalah satuan terkecil.
+ * Kolom `Qty/` SUDAH berisi jumlah satuan tujuan per satu satuan transaksi.
+ * Jangan dikalikan lagi dengan angka pada label `@N`.
+ *
+ *   Satuan      Qty/  Paket   Arti
+ *   PCS         1     PCS     1 transaksi = 1 PCS          -> faktor 1
+ *   @6          6     PCS     1 transaksi = 6 PCS          -> faktor 6
+ *   PCS         1     PCS
+ *   @15 DUS     750   PCS     1 transaksi = 750 PCS        -> faktor 750
+ *
+ * Label `@N X` TETAP DISIMPAN sebagai satuan tersendiri (`@6`, `@5 SAK`,
+ * `@25 Kg`), karena itu satuan transaksi yang dipakai iPOSS dan harus bisa
+ * dipilih saat menerima barang. Yang dilarang hanyalah meleburnya menjadi `X`
+ * — kalau dilebur, `@5 SAK` bertabrakan dengan `SAK` dan barisnya terbuang.
+ *
+ * Satuan dasar TIDAK ditebak dari nama (BAL/SAK bisa jadi satuan terkecil).
+ * Yang menentukan: satuan tujuan yang tidak pernah menjadi satuan asal.
  */
 function resolveFactors(rows: ConversionRow[]): Record<string, number> {
-  const table = rows.filter(
-    (row) => row.fromUnit !== row.toUnit && row.toUnitQty > 0 && row.isActive !== false
-  );
-  if (table.length === 0) return {};
-
-  const units = new Set<string>();
-  for (const row of table) {
-    units.add(row.fromUnit);
-    units.add(row.toUnit);
-  }
-
-  const sources = new Set(table.map((row) => row.fromUnit));
-  const targets = new Set(table.map((row) => row.toUnit));
-
-  // Satuan terkecil = tujuan yang tidak pernah menjadi sumber.
-  const leaves = [...units].filter((unit) => targets.has(unit) && !sources.has(unit));
-  const base = leaves[0] || [...units].find((unit) => !sources.has(unit)) || "";
-  if (!base) return {};
-
-  // Faktor langsung untuk mempercepat; graf tetap dipakai sebagai cadangan
-  // agar rantai bertingkat (BAL -> DUS -> PCS) tetap terpecahkan.
-  const factors: Record<string, number> = { [base]: 1 };
-
-  const resolve = (unit: string, depth: number, seen: Set<string>): number => {
-    if (unit === base) return 1;
-    if (depth > 8 || seen.has(unit)) return 0;
-    seen.add(unit);
-    let best = 0;
-    for (const row of table) {
-      if (row.fromUnit !== unit) continue;
-      const sub = resolve(row.toUnit, depth + 1, new Set(seen));
-      const total = row.toUnitQty * (sub || 0);
-      if (total > best) best = total;
-    }
-    return best;
+  type Norm = {
+    raw: string;
+    isLabel: boolean;
+    qty: number;
+    fromUnit: string;
+    labelQty: number;
+    toUnit: string;
+    toQty: number;
+    toLabelQty: number;
+    toIsLabel: boolean;
   };
 
-  for (const unit of units) {
-    const factor = resolve(unit, 0, new Set());
-    if (factor > 0) factors[unit] = factor;
+  const norm: Norm[] = [];
+  for (const row of rows) {
+    if (row.isActive === false) continue;
+    const raw = wmsToText(row.fromUnit).toUpperCase();
+    const qty = wmsToNumber(row.toUnitQty);
+    if (!raw || qty <= 0) continue;
+
+    const fromLabel = parseMultiPackLabel(raw);
+    const toLabel = parseMultiPackLabel(row.toUnit);
+
+    norm.push({
+      raw,
+      isLabel: Boolean(fromLabel),
+      qty,
+      fromUnit: wmsToText(fromLabel ? fromLabel.unit : raw).toUpperCase(),
+      labelQty: fromLabel ? fromLabel.qty : 1,
+      toUnit: wmsToText(toLabel ? toLabel.unit : row.toUnit).toUpperCase(),
+      toQty: qty,
+      toLabelQty: toLabel ? toLabel.qty : 1,
+      toIsLabel: Boolean(toLabel),
+    });
+  }
+  if (norm.length === 0) return {};
+
+  // 1) Satuan dasar = satuan Paket berupa satuan NYATA pada baris Qty/ = 1.
+  //    Paket berlabel '@M' bukan satuan dasar (itu ukuran kemasan).
+  let base = "";
+  for (const row of norm) {
+    if (row.qty === 1 && row.toUnit && !row.toIsLabel) {
+      base = row.toUnit;
+      break;
+    }
+  }
+  if (!base) {
+    for (const row of norm) {
+      if (row.toUnit && !row.toIsLabel) {
+        base = row.toUnit;
+        break;
+      }
+    }
+  }
+  // 2) Paket berlabel '@25 Kg' tetap menyebut satuannya (KG). Dipakai untuk
+  //    item yang SATU-SATUNYA barisnya berbentuk '@25 Kg | 1 | @25 Kg'
+  //    (mis. 201M (25 KG), BURAS BMS (25 KG)) agar '1 @25 Kg = 25 KG' tidak hilang.
+  if (!base) {
+    for (const row of norm) {
+      if (row.toIsLabel && row.toUnit) {
+        base = row.toUnit;
+        break;
+      }
+    }
+  }
+  // 2) Graf satuan biasa (tanpa '@') memberi faktor satuan fisik.
+  const edges: Record<string, { value: number; to: string }[]> = {};
+  for (const row of norm) {
+    if (row.isLabel) continue;
+    const from = row.fromUnit || row.raw;
+    if (!from) continue;
+    if (!row.toUnit) continue;
+    const value = row.qty * row.toLabelQty;
+    if (value <= 0) continue;
+    if (from === row.toUnit && Math.abs(value - 1) < 1e-9) continue;
+    (edges[from] = edges[from] || []).push({ value, to: row.toUnit });
   }
 
-  return factors;
+  const factors: Record<string, number> = { [base]: 1 };
+  const resolveUnit = (unit: string, seen: Set<string>): number => {
+    if (unit === base) return 1;
+    if (factors[unit]) return factors[unit];
+    if (seen.has(unit)) return 0;
+    const next = new Set(seen);
+    next.add(unit);
+    for (const edge of edges[unit] || []) {
+      if (edge.value <= 0) continue;
+      const sub = resolveUnit(edge.to, next);
+      if (sub > 0) {
+        factors[unit] = edge.value * sub;
+        return factors[unit];
+      }
+    }
+    return 0;
+  };
+  for (const unit of Object.keys(edges)) {
+    const value = resolveUnit(unit, new Set());
+    if (value > 0) factors[unit] = value;
+  }
+
+  // 3) Faktor sel Paket.
+  //    - Paket satuan nyata  -> faktornya x (mis. Paket = DUS, x = 25)
+  //    - Paket '@M'          -> M
+  //    - Paket kosong / '-'  -> 1 (kebanyakan item memakai PCS implisit)
+  const paketFactor = (row: Norm): number => {
+    if (row.toUnit) return row.toLabelQty * (factors[row.toUnit] || 0);
+    // Paket '@3' berarti kemasan berisi 3 satuan: 1 transaksi = 3 satuan.
+    if (row.toIsLabel) return row.toLabelQty;
+    return 1;
+  };
+
+  const out: Record<string, number> = {};
+  for (const row of norm) {
+    const pf = paketFactor(row);
+    if (pf <= 0) continue;
+    const factor = Math.round(row.qty * pf * 1000) / 1000;
+    if (factor <= 0) continue;
+
+    // Satuan dasar tidak perlu baris sendiri.
+    if (!row.isLabel && (row.fromUnit || row.raw) === base && Math.abs(factor - 1) < 1e-9) continue;
+
+    // Label '@N' disimpan APA ADANYA sebagai satuan tersendiri.
+    const key = row.isLabel ? row.raw : row.fromUnit || row.raw;
+    if (!key || key === base) continue;
+    if (!row.isLabel && key === row.toUnit && Math.abs(factor - 1) < 1e-9) continue;
+    out[key] = Math.max(out[key] || 0, factor);
+  }
+
+  // Satuan dasar hanya dicantumkan bila ada satuan lain yang benar-benar
+  // terhubung. Tanpa itu hasilnya {} dan pemanggil memakai UNIT_BASE item.
+  if (Object.keys(out).length === 0) return {};
+  if (base) out[base] = 1;
+  return out;
 }
 
 /**
@@ -236,8 +322,13 @@ function resolveFactors(rows: ConversionRow[]): Record<string, number> {
  *
  * Aturan:
  * - Satuan dasar (faktor 1) selalu ada.
- * - Hanya satuan yang punya faktor > 1 yang ditawarkan.
- * - Satuan transaksi yang kebetulan SAMA dengan satuan dasar tetap satu pilihan.
+ * - Hanya satuan yang punya faktor >= 1 yang ditawarkan.
+ * - Label multipak `@N X` DITAMPILKAN sebagai pilihan tersendiri, karena itu
+ *   satuan transaksi nyata di iPOSS: `@3 SAK`, `@5 SAK`, `@20 SAK`, `@6`, `@25 Kg`.
+ *   Tanpa ini, kasir/penerima hanya bisa memilih SAK dan harus menghitung
+ *   sendiri berapa karung yang datang.
+ * - Diurutkan dari faktor terkecil, jadi satuan dasar selalu di atas dan
+ *   multipak kecil (mis. `@3`) mendahului multipak besar (mis. `@20`).
  *
  * Contoh: BR11 CP (50 KG) -> satuan dasar BAL, tanpa konversi lain -> pilihan
  * hanya "BAL". Ini benar: 1 BAL memang satuannya, bukan 50 PCS.
@@ -258,7 +349,15 @@ function buildUnitOptions(
       isBase: unit === base,
     }))
     .filter((option) => option.toUnitQty >= 1)
-    .sort((a, b) => a.toUnitQty - b.toUnitQty);
+    .sort((a, b) => {
+      if (a.isBase !== b.isBase) return a.isBase ? -1 : 1;
+      if (a.toUnitQty !== b.toUnitQty) return a.toUnitQty - b.toUnitQty;
+      // Faktor sama (mis. DUS 20 dan @20 PCS): satuan fisik dulu, label @ sesudahnya.
+      const aLabel = a.unit.startsWith("@");
+      const bLabel = b.unit.startsWith("@");
+      if (aLabel !== bLabel) return aLabel ? 1 : -1;
+      return a.unit.localeCompare(b.unit);
+    });
 
   // Pastikan satuan dasar ada walau tabel konversi tidak menyebutnya.
   if (!options.some((option) => option.unit === base)) {
@@ -299,8 +398,11 @@ function breakdownBaseQty(
   const negative = qty < 0;
   let remaining = Math.round(Math.abs(qty) * 1000) / 1000;
 
+  // Label multipak ('@5 SAK', '@6') adalah satuan TRANSAKSI, bukan satuan
+  // tampilan saldo. Saldo tetap dipecah ke satuan fisik saja supaya
+  // "3 @5 SAK" tidak pernah muncul sebagai hasil pecahan stok.
   const ordered = Object.entries(table)
-    .filter(([unit, factor]) => unit !== base && factor > 1)
+    .filter(([unit, factor]) => unit !== base && factor > 1 && !unit.startsWith("@"))
     .sort((a, b) => b[1] - a[1]);
 
   const parts: UnitBreakdown[] = [];

@@ -35,3 +35,6 @@ kayorama-debug.log
 src/dataconnect-generated/
 __pycache__/
 *.pyc
+
+# File sumber iPOSS (unduhan Google Drive) — disimpan di templates/.../source
+google_drive/
