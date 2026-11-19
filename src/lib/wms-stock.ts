@@ -675,6 +675,26 @@ export function normalizeNameKey(value: unknown): string {
   return toText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+/**
+ * Penanda barang discontinued pada nama barang iPOSS.
+ *
+ * Konvensi pemilik data: nama yang mengandung `(DC)` adalah barang yang sudah
+ * DISCONTINUE / tidak aktif. Contoh nyata:
+ *
+ *   "(DC) 220 VOLT ON FIRE LB (48)"   -> discontinued
+ *   "(DC ) FURKIDO FLEA & TICK ..."   -> discontinued (spasi di dalam kurung)
+ *   "CAT CHOIZE KITTEN SALMON 20KG"   -> aktif
+ *
+ * Hanya `(DC)` yang berdiri sebagai penanda yang dihitung. Teks lain yang
+ * kebetulan mengandung "DC" (mis. "DC MOTOR") tidak boleh ikut tertandai,
+ * karena itu bagian nama barang, bukan status.
+ */
+const DISCONTINUED_NAME_RE = /\(\s*DC\s*\)/i;
+
+export function isDiscontinuedName(itemName: unknown): boolean {
+  return DISCONTINUED_NAME_RE.test(toText(itemName));
+}
+
 export function bridgeConversionsToItems(
   conversions: RawConversionRow[],
   items: { itemId: string; itemName: string }[]
