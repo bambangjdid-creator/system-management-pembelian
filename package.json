@@ -12,7 +12,9 @@
     "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "validate": "npm run typecheck && npm run test:run && npm run build"
+    "validate": "npm run typecheck && npm run test:run && npm run build",
+    "verify:vercel": "bash tools/wms/verify_vercel_bundle.sh",
+    "wms:inline": "python3 tools/wms/inline_stock_module.py"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
