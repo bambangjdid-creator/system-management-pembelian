@@ -74,6 +74,28 @@ const toText = (value: unknown): string => String(value ?? "").trim();
  * (BAL -> DUS x12, DUS -> PCS x20). Fungsi ini menggabungkan keduanya
  * sehingga BAL -> PCS = 240 tanpa perlu tabel tambahan.
  */
+/**
+ * Baca label satuan multipak iPOSS.
+ *
+ * iPOSS memakai kolom Satuan seperti: "SAK", "@3 SAK", "@5 SAK", "@20 SAK".
+ * Artinya 1 transaksi "@5 SAK" = 5 paket SAK. Dipadukan dengan kolom Qty/:
+ *
+ *   Satuan   Qty/  Paket
+ *   SAK      1     SAK    -> 1 transaksi = 1 SAK
+ *   @3 SAK   3     SAK    -> 1 transaksi = 3 SAK
+ *   @20 SAK  20    SAK    -> 1 transaksi = 20 SAK
+ *
+ * Karena Paket selalu "SAK", satuan dasar tetap SAK dan TIDAK perlu ditebak.
+ */
+export function parseMultiPackLabel(label: string): { qty: number; unit: string } | null {
+  const raw = toText(label).toUpperCase();
+  const match = /^@\s*(\d+)\s*([A-Z]*)$/.exec(raw);
+  if (!match) return null;
+  const qty = Number(match[1]);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  return { qty, unit: match[2] || "" };
+}
+
 export function buildUnitFactors(
   conversions: ConversionRow[]
 ): Record<string, Record<string, number>> {
@@ -82,58 +104,143 @@ export function buildUnitFactors(
 
   for (const row of conversions) {
     const itemId = toText(row.itemId).toUpperCase();
-    const from = toText(row.fromUnit).toUpperCase();
+    const rawFrom = toText(row.fromUnit).toUpperCase();
     const to = toText(row.toUnit).toUpperCase();
-    const factor = toNumber(row.toUnitQty);
-    if (!itemId || !from || !to || factor <= 0) continue;
+    let factor = toNumber(row.toUnitQty);
+    if (!itemId || !rawFrom || !to || factor <= 0) continue;
     if (row.isActive === false) continue;
-    (byItem[itemId] = byItem[itemId] || []).push({ ...row, fromUnit: from, toUnit: to, toUnitQty: factor });
+
+    // "@5 SAK" dengan Qty/=3 berarti 3 x 5 = 15 SAK, bukan 3.
+    // Satuan tetap dibaca sebagai SAK supaya rantainya menyatu dengan
+    // baris level 1 ("SAK" 1 SAK) dan tidak muncul satuan palsu "@5 SAK".
+    let from = rawFrom;
+    const multi = parseMultiPackLabel(rawFrom);
+    if (multi) {
+      factor = factor * multi.qty;
+      from = multi.unit || to;
+    }
+
+    if (from === to && factor === 1) continue;
+
+    (byItem[itemId] = byItem[itemId] || []).push({
+      ...row,
+      fromUnit: from,
+      toUnit: to,
+      toUnitQty: factor,
+    });
   }
 
   for (const [itemId, rows] of Object.entries(byItem)) {
-    // Faktor langsung: from -> to. Kebanyakan data hanya satu tingkat
-    // (DUS -> PCS), jadi ini menangani sebagian besar kasus tanpa iterasi.
-    const direct: Record<string, number> = {};
-    for (const row of rows) direct[`${row.fromUnit}|${row.toUnit}`] = row.toUnitQty;
-
-    const units = new Set<string>();
-    for (const row of rows) {
-      units.add(row.fromUnit);
-      units.add(row.toUnit);
-    }
-
-    // Satuan dasar = tujuan (toUnit) yang tidak pernah jadi sumber (fromUnit).
-    const sources = new Set(rows.map((r) => r.fromUnit));
-    const baseCandidates = [...units].filter((u) => !sources.has(u));
-    const base = baseCandidates.length === 1 ? baseCandidates[0] : baseCandidates[0] || "";
-
-    const factors: Record<string, number> = {};
-    if (base) factors[base] = 1;
-
-    // Telusuri rantai sampai satuan dasar, maksimal 8 tingkat untuk mencegah
-    // loop bila data konversi saling menunjuk.
-    const resolve = (unit: string, depth: number, seen: Set<string>): number => {
-      if (base && unit === base) return 1;
-      if (depth > 8 || seen.has(unit)) return 0;
-      seen.add(unit);
-      let best = 0;
-      for (const row of rows) {
-        if (row.fromUnit !== unit) continue;
-        const sub = resolve(row.toUnit, depth + 1, new Set(seen));
-        const total = row.toUnitQty * (sub || 0);
-        if (total > best) best = total;
-      }
-      return best;
-    };
-
-    for (const unit of units) {
-      const factor = resolve(unit, 0, new Set());
-      if (factor > 0) factors[unit] = factor;
-    }
-    result[itemId] = factors;
+    result[itemId] = resolveFactors(rows);
   }
 
   return result;
+}
+
+/**
+ * Hitung faktor setiap satuan ke SATUAN DASAR dari relasi master data.
+ *
+ * Aturan master data (iPOSS -> UNIT_CONVERSION):
+ *   1 [FROM_UNIT] = TO_UNIT_QTY [TO_UNIT]
+ *
+ * Perhatikan kolom-kolom iPOSS aslinya:
+ *   Satuan | Qty/ | Paket
+ *   BAL    | 1    | BAL      -> BAL adalah satuan terkecil sekaligus satuan transaksi
+ *   SAK    | 3    | SAK      -> 1 transaksi SAK = 3 paket SAK
+ *   Kg     | 25   | BAL      -> 1 BAL = 25 Kg, jadi Kg LEBIH KECIL dari BAL
+ *
+ * Jadi satuan dasar tidak boleh ditebak dari nama, dan BAL/SAK tidak otomatis
+ * dianggap satuan besar. Yang menentukan adalah arah relasi: satuan yang selalu
+ * muncul sebagai To (tidak pernah sebagai From) adalah satuan terkecil.
+ */
+export function resolveFactors(rows: ConversionRow[]): Record<string, number> {
+  const table = rows.filter(
+    (row) => row.fromUnit !== row.toUnit && row.toUnitQty > 0 && row.isActive !== false
+  );
+  if (table.length === 0) return {};
+
+  const units = new Set<string>();
+  for (const row of table) {
+    units.add(row.fromUnit);
+    units.add(row.toUnit);
+  }
+
+  const sources = new Set(table.map((row) => row.fromUnit));
+  const targets = new Set(table.map((row) => row.toUnit));
+
+  // Satuan terkecil = tujuan yang tidak pernah menjadi sumber.
+  const leaves = [...units].filter((unit) => targets.has(unit) && !sources.has(unit));
+  const base = leaves[0] || [...units].find((unit) => !sources.has(unit)) || "";
+  if (!base) return {};
+
+  // Faktor langsung untuk mempercepat; graf tetap dipakai sebagai cadangan
+  // agar rantai bertingkat (BAL -> DUS -> PCS) tetap terpecahkan.
+  const factors: Record<string, number> = { [base]: 1 };
+
+  const resolve = (unit: string, depth: number, seen: Set<string>): number => {
+    if (unit === base) return 1;
+    if (depth > 8 || seen.has(unit)) return 0;
+    seen.add(unit);
+    let best = 0;
+    for (const row of table) {
+      if (row.fromUnit !== unit) continue;
+      const sub = resolve(row.toUnit, depth + 1, new Set(seen));
+      const total = row.toUnitQty * (sub || 0);
+      if (total > best) best = total;
+    }
+    return best;
+  };
+
+  for (const unit of units) {
+    const factor = resolve(unit, 0, new Set());
+    if (factor > 0) factors[unit] = factor;
+  }
+
+  return factors;
+}
+
+/**
+ * Satuan yang boleh dipakai saat menerima barang.
+ *
+ * Aturan:
+ * - Satuan dasar (faktor 1) selalu ada.
+ * - Hanya satuan yang punya faktor > 1 yang ditawarkan.
+ * - Satuan transaksi yang kebetulan SAMA dengan satuan dasar tetap satu pilihan.
+ *
+ * Contoh: BR11 CP (50 KG) -> satuan dasar BAL, tanpa konversi lain -> pilihan
+ * hanya "BAL". Ini benar: 1 BAL memang satuannya, bukan 50 PCS.
+ */
+export function buildUnitOptions(
+  unitBase: string,
+  factors: Record<string, number> | undefined,
+  preferredUnit?: string
+): { unit: string; toUnitQty: number; isBase: boolean }[] {
+  const base = toText(unitBase).toUpperCase() || "PCS";
+  const table = { ...(factors || {}) };
+  if (!table[base]) table[base] = 1;
+
+  const options = Object.entries(table)
+    .map(([unit, factor]) => ({
+      unit,
+      toUnitQty: Math.round(toNumber(factor) * 1000) / 1000,
+      isBase: unit === base,
+    }))
+    .filter((option) => option.toUnitQty >= 1)
+    .sort((a, b) => a.toUnitQty - b.toUnitQty);
+
+  // Pastikan satuan dasar ada walau tabel konversi tidak menyebutnya.
+  if (!options.some((option) => option.unit === base)) {
+    options.unshift({ unit: base, toUnitQty: 1, isBase: true });
+  }
+
+  // Satuan dari PO naik ke urutan pertama supaya checker tidak perlu klik.
+  const wanted = toText(preferredUnit).toUpperCase();
+  if (wanted) {
+    const index = options.findIndex((option) => option.unit === wanted);
+    if (index > 0) options.unshift(...options.splice(index, 1));
+  }
+
+  return options;
 }
 
 /**
@@ -432,4 +539,98 @@ export function summarize(balances: StockBalance[]) {
     lowCount: balances.filter((row) => row.status === "LOW").length,
     emptyCount: balances.filter((row) => row.status === "EMPTY").length,
   };
+}
+
+/**
+ * Jembatani tab UNIT_CONVERSION ke ITEM_MASTER.
+ *
+ * Kenyataan data:
+ *   UNIT_CONVERSION.ITEM_ID  = kode iPOSS  (SPS000023)
+ *   ITEM_MASTER.ITEM_ID      = kode internal (ITM-000001)
+ *   ITEM_MASTER.IPOS_CODE    = KOSONG di semua 8.789 baris
+ *
+ * Jadi TIDAK ADA kunci bersama selain NAMA barang. Konversi harus dipetakan
+ * lewat nama yang dinormalkan (huruf besar, spasi & tanda baca dibuang).
+ *
+ * Nama yang dipakai lebih dari satu item sengaja DIBUANG, supaya konversi
+ * tidak menempel ke barang yang salah. Lebih baik item dianggap tanpa
+ * konversi daripada stoknya salah hitung.
+ */
+export type RawConversionRow = {
+  itemId?: string;
+  itemName?: string;
+  fromUnit?: string;
+  toUnit?: string;
+  toUnitQty?: number | string;
+  level?: number | string;
+  isActive?: string | boolean;
+};
+
+export type BridgedConversion = {
+  itemId: string;
+  fromUnit: string;
+  toUnit: string;
+  toUnitQty: number;
+  level: number;
+  isActive: boolean;
+};
+
+export function normalizeNameKey(value: unknown): string {
+  return toText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function bridgeConversionsToItems(
+  conversions: RawConversionRow[],
+  items: { itemId: string; itemName: string }[]
+): { byItem: Map<string, BridgedConversion[]>; stats: { bridged: number; direct: number; unresolved: number; ambiguousNames: number } } {
+  const idByName = new Map<string, string>();
+  const ambiguous = new Set<string>();
+
+  for (const item of items) {
+    const key = normalizeNameKey(item.itemName);
+    const id = toText(item.itemId).toUpperCase();
+    if (!key || !id) continue;
+    const existing = idByName.get(key);
+    if (existing && existing !== id) {
+      ambiguous.add(key);
+      continue;
+    }
+    idByName.set(key, id);
+  }
+  for (const key of ambiguous) idByName.delete(key);
+
+  const byItem = new Map<string, BridgedConversion[]>();
+  const stats = { bridged: 0, direct: 0, unresolved: 0, ambiguousNames: ambiguous.size };
+
+  for (const row of conversions) {
+    const rawId = toText(row.itemId).toUpperCase();
+    if (!rawId) continue;
+
+    let itemId: string;
+    if (/^ITM-/.test(rawId)) {
+      itemId = rawId;
+      stats.direct += 1;
+    } else {
+      const bridged = idByName.get(normalizeNameKey(row.itemName));
+      if (!bridged) {
+        stats.unresolved += 1;
+        continue;
+      }
+      itemId = bridged;
+      stats.bridged += 1;
+    }
+
+    const list = byItem.get(itemId) || [];
+    list.push({
+      itemId,
+      fromUnit: toText(row.fromUnit).toUpperCase(),
+      toUnit: toText(row.toUnit).toUpperCase(),
+      toUnitQty: toNumber(row.toUnitQty),
+      level: toNumber(row.level),
+      isActive: String(row.isActive ?? "Y").toUpperCase() !== "N",
+    });
+    byItem.set(itemId, list);
+  }
+
+  return { byItem, stats };
 }

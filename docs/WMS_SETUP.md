@@ -457,3 +457,182 @@ pertanyaan "kenapa stoknya segini?" tanpa membuka spreadsheet.
 - `src/features/wms/__tests__/stockOverview.test.tsx` (6) — halaman benar-benar
   memanggil `/api/wms/stock`, menampilkan angka satuan dasar, rincian bertingkat, dan
   label status
+
+---
+
+# 12. ATURAN KONVERSI SATUAN (dikoreksi 18 Nov 2026)
+
+Bagian ini menggantikan asumsi sebelumnya. Sumber kebenaran: **Master Data Konversi
+iPOSS**, bukan tebakan dari nama satuan.
+
+## Cara membaca satu baris konversi
+
+iPOSS menulis tiga kolom: **Satuan | Qty/ | Paket**, dan artinya:
+
+```
+1 [SATUAN] = [QTY/] [PAKET]
+```
+
+| Satuan | Qty/ | Paket | Arti |
+|---|---|---|---|
+| BAL | 1 | BAL | BAL adalah satuan terkecil **dan** satuan transaksi |
+| SAK | 3 | SAK | 1 transaksi SAK = 3 paket SAK |
+| Kg | 25 | BAL | 1 BAL = 25 Kg — jadi **Kg lebih kecil dari BAL** |
+| DUS | 20 | PCS | 1 DUS = 20 PCS |
+
+## Yang SALAH sebelumnya
+
+Kode lama menganggap setiap item **selalu** punya satuan besar dan satuan terkecil
+terpisah, dan menebak satuan dasar dari nama. Akibatnya:
+
+- **BR11 CP (50 KG)** dipaksa punya satuan dasar PCS
+- **CANARY SEED TOYS 25 KG** dipaksa punya satuan dasar PCS
+- **BAL** dianggap selalu satuan besar, padahal di banyak item BAL justru satuan terkecil
+
+Tidak ada PCS di master data untuk barang-barang itu. Menampilkan PCS di sana adalah
+karangan.
+
+## Aturan yang benar
+
+**Satuan dasar tidak ditentukan oleh namanya, tapi oleh arah relasi.**
+
+Satuan yang selalu muncul sebagai **Paket** dan tidak pernah sebagai **Satuan** adalah
+satuan terkecil. Jadi:
+
+- BAL bisa jadi satuan terkecil (BR11 CP) **dan** satuan besar (GALAC ZOO: 1 BAL = 50 Kg)
+- SAK bisa jadi satuan terkecil (CANARY SEED) **dan** satuan besar (CCKITTEN: 1 SAK = 20 PCS)
+
+Kode tidak boleh punya daftar "satuan besar" bawaan. Yang menentukan hanya data.
+
+## Bug paling serius: konversi tidak pernah terbaca
+
+| Kolom | Isi |
+|---|---|
+| `UNIT_CONVERSION.ITEM_ID` | `SPS000023` (kode iPOSS) |
+| `ITEM_MASTER.ITEM_ID` | `ITM-000001` |
+| `ITEM_MASTER.IPOS_CODE` | **kosong di seluruh 8.789 baris** |
+
+Tidak ada kunci bersama selain **NAMA barang**. Sebelum diperbaiki, pencocokan memakai
+`ITEM_ID` sehingga **0 dari 2.634 item** punya konversi — artinya semua PO akan ditolak
+dengan pesan "satuan tidak punya konversi".
+
+Sekarang konversi dijembatani lewat nama yang dinormalkan (huruf besar, spasi dan tanda
+baca dibuang): `511  bravo (25 kg)` cocok dengan `511 BRAVO (25 KG)`.
+
+**Nama yang dipakai lebih dari satu item sengaja dibuang**, bukan ditebak. Lebih baik
+item dianggap tanpa konversi (muncul peringatan) daripada konversi menempel ke barang
+yang salah.
+
+## Hasil validasi terhadap master data nyata
+
+Diuji dengan 8.789 item dan 2.800 baris konversi:
+
+| Ukuran | Sebelum | Sesudah |
+|---|---|---|
+| Item punya konversi | **0** | **2.624** |
+| Baris konversi terbaca | 0 | 2.788 |
+| Nama ganda (dibuang) | — | 44 |
+| Konversi tanpa padanan | — | 12 |
+| `UNIT_BASE` master ≠ satuan terkecil tabel | — | **0** |
+
+Selisih nol itu penting: artinya `UNIT_BASE` di `ITEM_MASTER` **memang** sudah diisi
+satuan terkecil, dan tabel konversi konsisten dengannya. Jadi tidak perlu migrasi data.
+
+## Dampak ke form Terima Barang
+
+Pilihan satuan per baris sekarang mengikuti aturan ini:
+
+| Barang | Satuan dasar | Yang bisa dipilih |
+|---|---|---|
+| BR11 CP (50 KG) | BAL | **BAL saja** |
+| CANARY SEED TOYS 25 KG | SAK | **SAK saja** |
+| GALAC ZOO | KG | KG, BAL, SAK |
+| KAPAS 1 LAPIS | PCS | PCS, BAL |
+
+Untuk BR11, memilih BAL berarti faktor 1 — **1 BAL tetap 1 BAL**, tidak dikali apa pun.
+Ini yang benar: satuannya memang BAL, bukan 50 PCS.
+
+## Catatan teknis: modul API dipindah
+
+`wms-stock.ts` dipindah dari `api/` ke `src/lib/`. Vercel memperlakukan setiap berkas di
+`api/` sebagai fungsi serverless. Berkas kedua di sana membuat deployment memiliki
+**2 fungsi**, bukan 1, dan seluruh `/api/*` menjadi 500. Sekarang `api/` hanya berisi
+`server.ts`.
+
+---
+
+# 13. Satuan multipak "@N" — BUKAN duplikat
+
+Dikoreksi 18 Nov 2026 setelah koreksi langsung dari pemilik data.
+
+## Kesalahan yang diperbaiki
+
+Script pembuat master data membuang **semua** baris yang kolom `Satuan`-nya
+berawalan `@`, dengan alasan "tier harga iPOSS". Alasan itu **salah**.
+
+Baris seperti ini bukan duplikat:
+
+| Nama Barang | Satuan | Qty/ | Paket |
+|---|---|---|---|
+| CAT CHOIZE KITTEN SALMON 20KG | SAK | 1 | SAK |
+| CAT CHOIZE KITTEN SALMON 20KG | @3 SAK | 3 | SAK |
+| CAT CHOIZE KITTEN SALMON 20KG | @5 SAK | 5 | SAK |
+| CAT CHOIZE KITTEN SALMON 20KG | @20 SAK | 20 | SAK |
+
+Empat baris itu punya **satuan berbeda**: `SAK`, `@3 SAK`, `@5 SAK`, `@20 SAK`.
+Artinya:
+
+- 1 transaksi SAK = 1 SAK
+- 1 transaksi `@3 SAK` = 3 SAK
+- 1 transaksi `@20 SAK` = 20 SAK
+
+Dan **satuan terkecilnya ada di kolom Paket = SAK** — sama seperti `BAL`/`SAK` pada
+item lain. Jadi tidak boleh dibuang, dan tidak boleh dianggap satuan besar palsu.
+
+## Aturan resmi
+
+```
+1 [SATUAN] = [QTY/] [PAKET]
+```
+
+Label `@N X` berarti **N paket X dalam satu transaksi**. Bila kolom `Paket` juga `X`,
+maka satuannya adalah X itu sendiri, dengan faktor N × (Qty/).
+
+Satuan dasar sebuah item **selalu** diambil dari kolom `Paket` pada baris `Qty/ = 1`.
+Tidak pernah ditebak dari nama satuan.
+
+## Bukti dari data
+
+Pemeriksaan langsung ke `Master Data Konversi.xlsx` (sheet `Sheet`):
+
+| Kenyataan | Jumlah |
+|---|---|
+| Baris memakai label `@` | **2.800+ baris** (mayoritas item punya beberapa) |
+| Baris `@` yang selamat ke `UNIT_CONVERSION` | **0** |
+| Baris `@` tersisa hanya di kolom NOTES | 61 |
+
+Artinya seluruh item kehilangan varian multipaknya. Contoh nyata: setiap barang
+retail punya `PCS` 1, `@3` 3, `@6` 6, `@12` 12 — semuanya hilang.
+
+## Yang berubah
+
+1. `tools/wms/build_masters.py` — baris `@` sekarang **dibaca**, bukan dibuang.
+   Faktornya `Qty/ × N`, dan labelnya dipetakan ke satuan di kolom Paket
+   (mis. `@5 SAK` → `SAK`, faktor 5).
+2. `src/lib/wms-stock.ts` — `parseMultiPackLabel()` membaca `@N X`, dan
+   `buildUnitFactors()` mengalikan `Qty/` dengan N. Tanpa ini, workbook yang
+   di-upload ulang akan tetap menyimpan satuan palsu `@5 SAK`.
+3. Label `@N X` **tidak pernah** muncul sebagai pilihan satuan di form.
+
+## Status saat ini — PERLU TINDAKAN
+
+Workbook `WMS_Database.xlsx` yang sekarang dipakai masih versi lama: 0 baris `@`.
+Kode sudah siap, tetapi datanya belum. Jadi sampai spreadsheet diperbarui:
+
+- Item seperti CAT CHOIZE KITTEN SALMON 20KG **tetap benar** → satuan dasar SAK,
+  pilihan hanya SAK. Tidak ada salah hitung.
+- Yang belum muncul: varian multipak (`@3 SAK`, `@5 SAK`, `@20 SAK`) sebagai
+  pilihan satuan saat menerima barang.
+
+Untuk mengaktifkannya, `Master Data Konversi.xlsx` perlu dibangun ulang dengan
+script yang sudah diperbaiki, lalu workbook-nya di-upload ulang.
