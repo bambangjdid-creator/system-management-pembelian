@@ -14,9 +14,12 @@ import {
   aggregateLedger,
   buildMovements,
   buildUnitFactors,
+  buildUnitOptions,
+  bridgeConversionsToItems,
   filterBalances,
+  resolveFactors,
   summarize,
-} from "./wms-stock";
+} from "../src/lib/wms-stock";
 
 const app = express();
 app.disable("x-powered-by");
@@ -3162,22 +3165,32 @@ function setOpeningConversionLookup(lookup: ConvLookup) {
   openingConversionLookup = lookup;
 }
 
-async function loadWmsConversions(auth: any) {
+async function loadWmsConversions(auth: any, items?: WmsItem[]) {
   const rows = rowsToObjects(await wmsValues(auth, WMS_TABS.UNIT_CONVERSION));
-  const map = new Map<string, { fromUnit: string; toUnit: string; toUnitQty: number }[]>();
-  for (const row of rows) {
-    if ((row.IS_ACTIVE || "Y").toUpperCase() !== "Y") continue;
-    const id = safeText(row.ITEM_ID).toUpperCase();
-    if (!id) continue;
-    const list = map.get(id) || [];
-    list.push({
-      fromUnit: safeText(row.FROM_UNIT).toUpperCase(),
-      toUnit: safeText(row.TO_UNIT).toUpperCase(),
-      toUnitQty: asNumber(row.TO_UNIT_QTY),
-    });
-    map.set(id, list);
-  }
-  return map;
+  const sourceItems = items || (await loadWmsItems(auth));
+
+  // Tab konversi memakai kode iPOSS (SPS000023), ITEM_MASTER memakai
+  // ITM-000001, dan IPOS_CODE kosong di semua baris. Satu-satunya jembatan
+  // adalah NAMA barang — lihat bridgeConversionsToItems.
+  const { byItem, stats } = bridgeConversionsToItems(
+    rows.map((row) => ({
+      itemId: row.ITEM_ID,
+      itemName: row.ITEM_NAME,
+      fromUnit: row.FROM_UNIT,
+      toUnit: row.TO_UNIT,
+      toUnitQty: row.TO_UNIT_QTY,
+      level: row.LEVEL,
+      isActive: row.IS_ACTIVE,
+    })),
+    sourceItems.map((item) => ({ itemId: item.itemId, itemName: item.itemName }))
+  );
+
+  console.log(
+    `[WMS] konversi: ${byItem.size} item terpetakan ` +
+    `(${stats.bridged} via nama, ${stats.direct} langsung, ` +
+    `${stats.unresolved} tak ketemu, ${stats.ambiguousNames} nama ganda)`
+  );
+  return byItem;
 }
 
 async function loadWmsWarehouses(auth: any) {
@@ -3588,19 +3601,22 @@ function matchWmsItem(
 // Daftar satuan yang sah untuk satu item: satuan dasar (faktor 1) + konversi aktif.
 function buildAllowedUnits(
   item: WmsItem | null,
-  conversions: { fromUnit: string; toUnit: string; toUnitQty: number }[]
+  conversions: { fromUnit: string; toUnit: string; toUnitQty: number; level?: number; isActive?: boolean }[]
 ): { unit: string; toUnitQty: number; isBase: boolean }[] {
   if (!item) return [];
-  const units = [{ unit: item.unitBase, toUnitQty: 1, isBase: true }];
-  const seen = new Set([item.unitBase.toUpperCase()]);
-  for (const conv of conversions) {
-    const key = conv.fromUnit.toUpperCase();
-    if (seen.has(key)) continue;
-    if (!conv.fromUnit || !conv.toUnitQty) continue;
-    seen.add(key);
-    units.push({ unit: conv.fromUnit, toUnitQty: conv.toUnitQty, isBase: false });
-  }
-  return units;
+  // Faktor disusun dari relasi master data, bukan dari nama satuan. BAL/SAK bisa
+  // jadi satuan terkecil sekaligus satuan transaksi, jadi tidak boleh ditebak.
+  const factors = resolveFactors(
+    conversions.map((conv) => ({
+      fromUnit: conv.fromUnit,
+      toUnit: conv.toUnit,
+      toUnitQty: conv.toUnitQty,
+      level: conv.level || 0,
+      isActive: conv.isActive !== false,
+    }))
+  );
+  const options = buildUnitOptions(item.unitBase, factors, item.buyUnitDefault);
+  return options.length ? options : [{ unit: item.unitBase, toUnitQty: 1, isBase: true }];
 }
 
 // Susun info WMS untuk semua baris PO. Konversi dibaca sekali per request.

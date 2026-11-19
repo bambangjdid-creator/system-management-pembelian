@@ -457,3 +457,104 @@ pertanyaan "kenapa stoknya segini?" tanpa membuka spreadsheet.
 - `src/features/wms/__tests__/stockOverview.test.tsx` (6) — halaman benar-benar
   memanggil `/api/wms/stock`, menampilkan angka satuan dasar, rincian bertingkat, dan
   label status
+
+---
+
+# 12. ATURAN KONVERSI SATUAN (dikoreksi 18 Nov 2026)
+
+Bagian ini menggantikan asumsi sebelumnya. Sumber kebenaran: **Master Data Konversi
+iPOSS**, bukan tebakan dari nama satuan.
+
+## Cara membaca satu baris konversi
+
+iPOSS menulis tiga kolom: **Satuan | Qty/ | Paket**, dan artinya:
+
+```
+1 [SATUAN] = [QTY/] [PAKET]
+```
+
+| Satuan | Qty/ | Paket | Arti |
+|---|---|---|---|
+| BAL | 1 | BAL | BAL adalah satuan terkecil **dan** satuan transaksi |
+| SAK | 3 | SAK | 1 transaksi SAK = 3 paket SAK |
+| Kg | 25 | BAL | 1 BAL = 25 Kg — jadi **Kg lebih kecil dari BAL** |
+| DUS | 20 | PCS | 1 DUS = 20 PCS |
+
+## Yang SALAH sebelumnya
+
+Kode lama menganggap setiap item **selalu** punya satuan besar dan satuan terkecil
+terpisah, dan menebak satuan dasar dari nama. Akibatnya:
+
+- **BR11 CP (50 KG)** dipaksa punya satuan dasar PCS
+- **CANARY SEED TOYS 25 KG** dipaksa punya satuan dasar PCS
+- **BAL** dianggap selalu satuan besar, padahal di banyak item BAL justru satuan terkecil
+
+Tidak ada PCS di master data untuk barang-barang itu. Menampilkan PCS di sana adalah
+karangan.
+
+## Aturan yang benar
+
+**Satuan dasar tidak ditentukan oleh namanya, tapi oleh arah relasi.**
+
+Satuan yang selalu muncul sebagai **Paket** dan tidak pernah sebagai **Satuan** adalah
+satuan terkecil. Jadi:
+
+- BAL bisa jadi satuan terkecil (BR11 CP) **dan** satuan besar (GALAC ZOO: 1 BAL = 50 Kg)
+- SAK bisa jadi satuan terkecil (CANARY SEED) **dan** satuan besar (CCKITTEN: 1 SAK = 20 PCS)
+
+Kode tidak boleh punya daftar "satuan besar" bawaan. Yang menentukan hanya data.
+
+## Bug paling serius: konversi tidak pernah terbaca
+
+| Kolom | Isi |
+|---|---|
+| `UNIT_CONVERSION.ITEM_ID` | `SPS000023` (kode iPOSS) |
+| `ITEM_MASTER.ITEM_ID` | `ITM-000001` |
+| `ITEM_MASTER.IPOS_CODE` | **kosong di seluruh 8.789 baris** |
+
+Tidak ada kunci bersama selain **NAMA barang**. Sebelum diperbaiki, pencocokan memakai
+`ITEM_ID` sehingga **0 dari 2.634 item** punya konversi — artinya semua PO akan ditolak
+dengan pesan "satuan tidak punya konversi".
+
+Sekarang konversi dijembatani lewat nama yang dinormalkan (huruf besar, spasi dan tanda
+baca dibuang): `511  bravo (25 kg)` cocok dengan `511 BRAVO (25 KG)`.
+
+**Nama yang dipakai lebih dari satu item sengaja dibuang**, bukan ditebak. Lebih baik
+item dianggap tanpa konversi (muncul peringatan) daripada konversi menempel ke barang
+yang salah.
+
+## Hasil validasi terhadap master data nyata
+
+Diuji dengan 8.789 item dan 2.800 baris konversi:
+
+| Ukuran | Sebelum | Sesudah |
+|---|---|---|
+| Item punya konversi | **0** | **2.624** |
+| Baris konversi terbaca | 0 | 2.788 |
+| Nama ganda (dibuang) | — | 44 |
+| Konversi tanpa padanan | — | 12 |
+| `UNIT_BASE` master ≠ satuan terkecil tabel | — | **0** |
+
+Selisih nol itu penting: artinya `UNIT_BASE` di `ITEM_MASTER` **memang** sudah diisi
+satuan terkecil, dan tabel konversi konsisten dengannya. Jadi tidak perlu migrasi data.
+
+## Dampak ke form Terima Barang
+
+Pilihan satuan per baris sekarang mengikuti aturan ini:
+
+| Barang | Satuan dasar | Yang bisa dipilih |
+|---|---|---|
+| BR11 CP (50 KG) | BAL | **BAL saja** |
+| CANARY SEED TOYS 25 KG | SAK | **SAK saja** |
+| GALAC ZOO | KG | KG, BAL, SAK |
+| KAPAS 1 LAPIS | PCS | PCS, BAL |
+
+Untuk BR11, memilih BAL berarti faktor 1 — **1 BAL tetap 1 BAL**, tidak dikali apa pun.
+Ini yang benar: satuannya memang BAL, bukan 50 PCS.
+
+## Catatan teknis: modul API dipindah
+
+`wms-stock.ts` dipindah dari `api/` ke `src/lib/`. Vercel memperlakukan setiap berkas di
+`api/` sebagai fungsi serverless. Berkas kedua di sana membuat deployment memiliki
+**2 fungsi**, bukan 1, dan seluruh `/api/*` menjadi 500. Sekarang `api/` hanya berisi
+`server.ts`.
