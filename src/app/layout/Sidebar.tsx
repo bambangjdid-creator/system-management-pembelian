@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, CheckCircle2, FileText, LayoutDashboard, Package, Plus, Settings, ShoppingBag, Upload } from '../../icons';
+import { AlertTriangle, Check, CheckCircle2, Clock, FileText, LayoutDashboard, Package, Plus, Settings, ShoppingBag, Upload } from '../../icons';
 import SidebarItem from '../../features/components/SidebarItem';
 import { isAdmin } from '../../lib/permissions';
 import type { AppUser } from '../../lib/types';
@@ -29,6 +29,8 @@ export default function Sidebar({ user, activeTab, setActiveTab, canSee, googleT
         {canSee('APPROVAL') && <SidebarItem icon={CheckCircle2} label="Approvals" active={activeTab === 'approvals'} onClick={() => setActiveTab('approvals')} />}
         {canSee('STOK GUDANG') && <SidebarItem icon={Package} label="Stok Gudang" active={activeTab === 'wms-stock'} onClick={() => setActiveTab('wms-stock')} />}
         {canSee('STOK GUDANG') && <SidebarItem icon={Upload} label="Stok Awal Gudang" active={activeTab === 'wms-opening'} onClick={() => setActiveTab('wms-opening')} />}
+        {canSee('STOK GUDANG') && <SidebarItem icon={Clock} label="Expiry Monitor" active={activeTab === 'wms-expiry'} onClick={() => setActiveTab('wms-expiry')} />}
+        {canSee('STOK GUDANG') && <SidebarItem icon={AlertTriangle} label="Master Konversi" active={activeTab === 'wms-conversions'} onClick={() => setActiveTab('wms-conversions')} />}
         {isAdmin(user) && <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />}
       </nav>
       <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-805 space-y-2">

@@ -64,11 +64,13 @@ if [ "$CODE" != "200" ]; then
   exit 1
 fi
 
-GUARD=$(curl -s -m 8 -o /dev/null -w '%{http_code}' \
-  "http://127.0.0.1:$PORT/api/wms/stock" 2>/dev/null || echo 000)
-echo "/api/wms/stock -> HTTP $GUARD (401 = route terdaftar)"
-if [ "$GUARD" != "401" ]; then
-  echo "GAGAL: route stok tidak terdaftar"; tail -30 "$TASK/log"; exit 1
-fi
+for route in /api/wms/stock /api/wms/expiry /api/wms/conversions; do
+  GUARD=$(curl -s -m 8 -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PORT$route" 2>/dev/null || echo 000)
+  echo "$route -> HTTP $GUARD (401 = route terdaftar)"
+  if [ "$GUARD" != "401" ]; then
+    echo "GAGAL: route $route tidak terdaftar"; tail -30 "$TASK/log"; exit 1
+  fi
+done
 
 echo "LULUS: bundle berjalan seperti di Vercel"
