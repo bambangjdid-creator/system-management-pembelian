@@ -10,6 +10,13 @@ import crypto from "crypto";
 dotenv.config();
 
 import PDFDocument from "pdfkit";
+import {
+  aggregateLedger,
+  buildMovements,
+  buildUnitFactors,
+  filterBalances,
+  summarize,
+} from "./wms-stock";
 
 const app = express();
 app.disable("x-powered-by");
@@ -2701,6 +2708,123 @@ app.get("/api/wms/items/:itemId", async (req, res) => {
   }
 });
 
+// --- Saldo stok per item x gudang -------------------------------------------
+// Dihitung ulang dari STOCK_LEDGER setiap request (ledger append-only), jadi
+// angka ini tidak pernah "basi" atau perlu proses sinkronisasi.
+//
+// Query: ?q= &warehouseId= &category= &belowMin=1 &limit= &offset=
+// Cache saldo: kunci memakai JUMLAH baris ledger, jadi begitu ada penerimaan
+// baru jumlahnya berubah dan cache otomatis tidak dipakai lagi.
+let wmsStockCache: { key: string; at: number; snapshot: any } | null = null;
+const WMS_STOCK_CACHE_MS = 60 * 1000;
+
+async function loadStockSnapshot(auth: any) {
+  const [items, warehouses, ledgerRows, convRows] = await Promise.all([
+    loadWmsItems(auth),
+    loadWmsWarehouses(auth),
+    wmsValues(auth, WMS_TABS.STOCK_LEDGER),
+    wmsValues(auth, WMS_TABS.UNIT_CONVERSION),
+  ]);
+
+  // Ledger tumbuh terus; halaman ini bisa dibuka berkali-kali dalam semenit.
+  // Simpan hasil hitungan sebentar supaya tidak membaca 8.789 item + ribuan
+  // baris ledger setiap klik filter.
+  const cacheKey = `${ledgerRows.length}|${convRows.length}|${items.length}`;
+  const cached = wmsStockCache;
+  if (cached && cached.key === cacheKey && Date.now() - cached.at < WMS_STOCK_CACHE_MS) {
+    return cached.snapshot;
+  }
+
+  const conversions = rowsToObjects(convRows).map((row) => ({
+    itemId: row.ITEM_ID || "",
+    fromUnit: row.FROM_UNIT || "",
+    toUnit: row.TO_UNIT || "",
+    toUnitQty: asNumber(row.TO_UNIT_QTY),
+    level: asNumber(row.LEVEL),
+    isActive: (row.IS_ACTIVE || "Y").toUpperCase() === "Y",
+  }));
+
+  const factorsByItem = buildUnitFactors(conversions);
+  const balances = aggregateLedger(
+    rowsToObjects(ledgerRows),
+    items.map((item) => ({
+      itemId: item.itemId,
+      itemName: item.itemName,
+      category: item.category,
+      unitBase: item.unitBase,
+      buyUnitDefault: item.buyUnitDefault,
+      iposCode: item.iposCode,
+      trackExpiry: item.trackExpiry,
+      minStock: item.minStock,
+      maxStock: item.maxStock,
+      isActive: item.isActive,
+    })),
+    warehouses.map((wh) => ({ warehouseId: wh.warehouseId, warehouseName: wh.warehouseName })),
+    factorsByItem
+  );
+
+  const snapshot = { balances, ledger: rowsToObjects(ledgerRows), warehouses, factorsByItem };
+  wmsStockCache = { key: cacheKey, at: Date.now(), snapshot };
+  return snapshot;
+}
+
+app.get("/api/wms/stock", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const { balances } = await loadStockSnapshot(auth);
+
+    const limit = Math.min(Math.max(asNumber(req.query.limit) || 200, 1), 2000);
+    const offset = Math.max(asNumber(req.query.offset), 0);
+
+    const filtered = filterBalances(balances, {
+      q: safeText(req.query.q),
+      warehouseId: safeText(req.query.warehouseId),
+      category: safeText(req.query.category),
+      belowMin: safeText(req.query.belowMin) === "1",
+    });
+
+    res.json({
+      success: true,
+      summary: summarize(balances),
+      filteredSummary: summarize(filtered),
+      total: filtered.length,
+      limit,
+      offset,
+      rows: filtered.slice(offset, offset + limit),
+    });
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_STOCK");
+  }
+});
+
+// Kartu stok: riwayat mutasi satu item beserta saldo berjalan.
+app.get("/api/wms/stock/:itemId/movements", async (req, res) => {
+  try {
+    const auth = getAuthFromRequest(req);
+    const itemId = cleanCode(req.params.itemId, "");
+    if (!itemId) {
+      return res.status(400).json({ success: false, message: "ITEM_ID wajib diisi." });
+    }
+
+    const { ledger, warehouses } = await loadStockSnapshot(auth);
+    const movements = buildMovements(ledger, itemId, warehouses.map((wh) => ({
+      warehouseId: wh.warehouseId,
+      warehouseName: wh.warehouseName,
+    })), { warehouseId: safeText(req.query.warehouseId) });
+
+    const last = movements[movements.length - 1];
+    res.json({
+      success: true,
+      itemId,
+      total: movements.length,
+      saldoAkhir: last ? last.runningBase : 0,
+      movements: movements.reverse(),
+    });
+  } catch (error: any) {
+    handleApiError(res, error, "WMS_STOCK_MOVEMENTS");
+  }
+});
+
 // Master konversi untuk layar admin. Query: ?q= &limit= &offset=
 app.get("/api/wms/conversions", async (req, res) => {
   try {
@@ -3323,6 +3447,8 @@ type WmsItem = {
   iposCode: string;
   trackExpiry: boolean;
   shelfLifeDays: number;
+  minStock: number;
+  maxStock: number;
   isActive: boolean;
 };
 
@@ -3337,6 +3463,8 @@ function mapWmsItem(row: Record<string, string>): WmsItem {
     iposCode: row.IPOS_CODE || "",
     trackExpiry: (row.TRACK_EXPIRY || "N").toUpperCase() === "Y",
     shelfLifeDays: asNumber(row.SHELF_LIFE_DAYS),
+    minStock: asNumber(row.MIN_STOCK),
+    maxStock: asNumber(row.MAX_STOCK),
     isActive: (row.IS_ACTIVE || "Y").toUpperCase() === "Y",
   };
 }

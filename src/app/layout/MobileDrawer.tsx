@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, CheckCircle2, FileText, LayoutDashboard, Plus, Settings, ShoppingBag, X, Package } from '../../icons';
+import { Check, CheckCircle2, FileText, LayoutDashboard, Plus, Settings, ShoppingBag, Upload, X, Package } from '../../icons';
 import SidebarItem from '../../features/components/SidebarItem';
 import { isAdmin } from '../../lib/permissions';
 import type { AppUser } from '../../lib/types';
@@ -55,7 +55,8 @@ export default function MobileDrawer({ user, activeTab, setActiveTab, canSee, go
               {canSee('PO HISTORY') && <SidebarItem icon={ShoppingBag} label="PO History" active={activeTab === 'po-history'} onClick={() => go('po-history')} />}
               {canSee('PURCHASE') && <SidebarItem icon={ShoppingBag} label="Purchase Queue" active={activeTab === 'purchase-queue'} onClick={() => go('purchase-queue')} />}
               {canSee('APPROVAL') && <SidebarItem icon={CheckCircle2} label="Approvals" active={activeTab === 'approvals'} onClick={() => go('approvals')} />}
-              {canSee('STOK GUDANG') && <SidebarItem icon={Package} label="Stok Awal Gudang" active={activeTab === 'wms-opening'} onClick={() => go('wms-opening')} />}
+              {canSee('STOK GUDANG') && <SidebarItem icon={Package} label="Stok Gudang" active={activeTab === 'wms-stock'} onClick={() => go('wms-stock')} />}
+              {canSee('STOK GUDANG') && <SidebarItem icon={Upload} label="Stok Awal Gudang" active={activeTab === 'wms-opening'} onClick={() => go('wms-opening')} />}
               {isAdmin(user) && <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => go('settings')} />}
             </nav>
             <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-850 space-y-2">

@@ -344,3 +344,116 @@ untuk keduanya.
   (ID / kode iPOSS / nama), daftar satuan yang sah
 - `src/features/receive/__tests__/receiveItemRow.test.ts` — 3 DUS = 60 PCS,
   satuan dasar faktor 1, qty kosong = 0, qty desimal
+
+---
+
+# 11. Halaman Stok Gudang + Kartu Stok
+
+Fase 1 no. 1.5. Menu **Stok Gudang** (di atas menu Stok Awal Gudang).
+
+## Prinsip: saldo tidak pernah disimpan
+
+Saldo **selalu dihitung ulang** dari `STOCK_LEDGER`. Tidak ada tabel saldo, tidak ada
+job sinkronisasi. Ledger bersifat append-only, jadi menjumlahkannya selalu benar — dan
+kalau ada selisih, penyebabnya selalu bisa ditemukan di baris ledger.
+
+Konsekuensinya: kalau ada baris ledger yang salah, **perbaiki barisnya** (atau tambah
+baris koreksi), jangan mengubah saldo di tempat lain.
+
+## Rumus
+
+```
+saldo(item, gudang) = Σ QTY_BASE
+```
+
+`QTY_BASE` sudah bertanda: `QTY_IN` positif, `QTY_OUT` negatif. Bila kolom `QTY_BASE`
+kosong (data lama), dipakai `(QTY_IN − QTY_OUT) × TO_UNIT_QTY`.
+
+## Tampilan saldo: pilihan C
+
+Angka utama **selalu satuan terkecil**, dengan rincian bertingkat sebagai pelengkap:
+
+| Saldo | Tampil |
+|---|---|
+| 5 PCS | `5 PCS` |
+| 60 PCS | `60 PCS` + `3 DUS / 60 PCS` |
+| 260 PCS | `260 PCS` + `1 BAL + 1 DUS / 260 PCS` |
+| 265 PCS | `265 PCS` + `1 BAL + 1 DUS + 5 PCS / 265 PCS` |
+| 0 | `0 PCS` |
+| −25 PCS | `-25 PCS` + `-1 DUS + -5 PCS / -25 PCS` |
+
+Alasan angka terkecil jadi utama: itulah yang tersimpan di ledger, jadi bisa dicocokkan
+langsung dengan spreadsheet. Satuan besar hanya kenyamanan membaca.
+
+**Konversi bertingkat** disusun otomatis: `BAL → DUS ×12` dan `DUS → PCS ×20`
+menghasilkan `BAL → PCS = 240` tanpa tabel tambahan. Rantai ditelusuri maksimal 8
+tingkat agar data yang saling menunjuk tidak membuat server berputar.
+
+## Status baris
+
+| Status | Arti |
+|---|---|
+| `EMPTY` | saldo ≤ 0 |
+| `LOW` | `MIN_STOCK > 0` dan saldo di bawahnya |
+| `OVER` | `MAX_STOCK > 0` dan saldo di atasnya |
+| `OK` | selain itu |
+
+Kalau `MIN_STOCK` tidak diisi (0), barang **tidak pernah** dianggap LOW. Ini disengaja:
+lebih baik diam daripada memunculkan ribuan peringatan palsu untuk barang yang belum
+punya batas minimum.
+
+## API
+
+`GET /api/wms/stock?q=&warehouseId=&category=&belowMin=1&limit=&offset=`
+
+```json
+{
+  "summary": { "rows": 1200, "items": 890, "warehouses": 3, "totalQtyBase": 52000, "lowCount": 14, "emptyCount": 3 },
+  "total": 1200,
+  "rows": [{ "itemId": "ITM-004945", "warehouseName": "Gudang Nagoya", "qtyBase": 260,
+             "display": "1 BAL + 1 DUS / 260 PCS", "status": "OK", "lastTrxDate": "2027-01-10" }]
+}
+```
+
+`summary` = seluruh stok, `filteredSummary` = setelah filter. Keduanya dikirim supaya
+kartu ringkasan tidak berubah-ubah saat pengguna mengetik pencarian.
+
+`GET /api/wms/stock/:itemId/movements?warehouseId=`
+
+Mengembalikan mutasi **terbaru lebih dulu** (sudah dibalik di server), dengan
+`runningBase` dihitung dari urutan **kronologis** — bukan urutan baris di sheet, yang
+tidak dijamin.
+
+## Kinerja
+
+Ledger tumbuh terus. Tanpa cache, setiap klik filter membaca 8.789 item + seluruh
+ledger. Cache 60 detik dengan kunci **jumlah baris ledger**: begitu ada penerimaan baru,
+jumlahnya berubah dan cache otomatis dilewati. Jadi tidak ada risiko angka basi setelah
+barang masuk.
+
+Bila ledger melewati ±50.000 baris, langkah berikutnya adalah tab ringkasan bulanan —
+bukan lagi menghitung seluruh ledger tiap request.
+
+## Filter
+
+- `q` — nama, kode iPOSS, ITEM_ID, atau kategori (tidak peka huruf besar)
+- `warehouseId` — satu gudang
+- `belowMin=1` — hanya yang di bawah minimum
+- Tabel menampilkan 100 baris; tombol di bawah memuat sampai 2.000
+
+## Klik baris → Kartu Stok
+
+Menampilkan riwayat: tanggal, tipe (`OPNAME_IN`, `RECEIVE`, …), referensi (nomor GR /
+nomor saldo awal), qty masuk, qty keluar, dan saldo berjalan. Ini yang menjawab
+pertanyaan "kenapa stoknya segini?" tanpa membuka spreadsheet.
+
+## Test
+
+`117 test` di 12 file. Yang baru:
+
+- `api/__tests__/wms-stock.test.ts` (40) — konversi bertingkat, pemecahan satuan,
+  agregasi per gudang, QTY_BASE kosong, stok minus, status LOW/EMPTY, filter,
+  saldo berjalan
+- `src/features/wms/__tests__/stockOverview.test.tsx` (6) — halaman benar-benar
+  memanggil `/api/wms/stock`, menampilkan angka satuan dasar, rincian bertingkat, dan
+  label status
