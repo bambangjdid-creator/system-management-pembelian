@@ -193,99 +193,171 @@ def guess_shelf_life(category: str, unit: str, name: str) -> str:
 
 stats_skip: Counter = Counter()
 
+MULTIPACK_RE = re.compile(r"^@\s*(\d+(?:[.,]\d+)?)\s*([A-Z]*)$")
+
+
+def parse_multipack(label) -> tuple[float, str, bool]:
+    """
+    Baca sel satuan/paket iPOSS.
+
+    "5"       -> (1, "5", False)
+    "@5 SAK"  -> (5, "SAK", True)
+    "@3"      -> (3, "", True)
+    "@25 Kg"  -> (25, "KG", True)
+    """
+    raw = str(label or "").strip().upper()
+    if not raw:
+        return 1.0, "", False
+    m = MULTIPACK_RE.match(raw)
+    if not m:
+        return 1.0, canon_unit(raw), False
+    size = float(m.group(1).replace(",", "."))
+    return size, canon_unit(m.group(2)), True
+
 
 def build_conversion_chain(rows: list[dict]) -> tuple[dict, str, str]:
     """
-    iPOSS menulis: Satuan | Qty/ | Paket  ==>  1 [Satuan] = Qty/ [Paket]
+    Susun faktor setiap satuan ke SATUAN DASAR dari Master Data Konversi.
 
-    Contoh A591-K:  DUS | 20 | PCS   ->  1 DUS = 20 PCS
-                    @5  | 5  | PCS   ->  1 @5  = 5 PCS
+    ATURAN TUNGGAL:  1 [Satuan] = [Qty/] [Paket]
 
-    Kembalikan (factors, unit_base, catatan) dengan factors = {unit: faktor ke base}.
+    Kolom Qty/ SUDAH berisi jumlah satuan tujuan per satu satuan transaksi,
+    jadi JANGAN dikalikan lagi dengan angka pada label '@N'. Bug lama
+    (Qty/ x N) membuat '@5 PAK' dihitung 25 dan seluruh konversi item hilang.
+
+    Contoh nyata:
+        Satuan    Qty/  Paket   Arti
+        PCS       1     PCS     1 transaksi = 1 PCS      -> faktor 1
+        @6        6     PCS     1 transaksi = 6 PCS      -> faktor 6
+        DUS       48    PCS     1 transaksi = 48 PCS     -> faktor 48
+        @5       1      @25 Kg  Paket 25 Kg              -> 25 x 5 = 125
+        @25 Kg    1     @25 Kg  Paket 25 Kg              -> 25
+
+    Label '@N X' TETAP disimpan sebagai satuan tersendiri ('@5 SAK', '@6',
+    '@25 Kg'), karena itu satuan transaksi nyata di iPOSS. Meleburnya menjadi
+    'X' membuat '@5 SAK' bertabrakan dengan 'SAK' dan barisnya terbuang.
+
+    Kembalikan (factors, unit_base, catatan).
     """
-    base_rows = [r for r in rows if r["qty"] == 1]
-    if not base_rows:
-        return {}, "", "tanpa baris qty=1"
-
-    label = str(base_rows[0]["paket"] or base_rows[0]["satuan"] or "").strip()
-    base_unit = canon_unit(label) or _raw_unit(label)
-    extra_note = ""
-
-    if not base_unit or base_unit.startswith("@"):
-        # iPOSS memakai label paket sebagai satuan: "@25 Kg", "@3", "@100".
-        # "@N Kg" = kemasan berisi N Kg -> base KG, kemasan jadi satuan BELI.
-        m = re.match(r"@\s*(\d+(?:[.,]\d+)?)\s*Kg?$", label, re.IGNORECASE)
-        if m:
-            size = float(m.group(1).replace(",", "."))
-            if size == 1:
-                return {}, "KG", f"satuan '{label}' dibaca sebagai KG"
-            return {"KEMASAN": size}, "KG", (
-                f"satuan iPOSS '{label}': 1 kemasan = {size:g} KG. "
-                "PERLU KONFIRMASI apakah stok dihitung per kemasan atau per KG"
-            )
-        m2 = re.match(r"@\s*(\d+)$", label)
-        if m2:
-            qty = float(m2.group(1))
-            return {"PAKET": qty}, "PCS", f"satuan '{label}' = 1 paket isi {qty:g} PCS"
-        base_unit = "PCS"
-        return {}, base_unit, f"satuan '{label}' tidak dikenali, diasumsikan PCS"
-
-    # graf: from -> (to, faktor). 1 [from] = faktor [to]
-    edges: dict[str, list[tuple[str, float]]] = defaultdict(list)
-    problems: list[str] = []
+    norm = []
     for row in rows:
-        frm = canon_unit(row["satuan"]) or _raw_unit(row["satuan"])
-        to = canon_unit(row["paket"]) or _raw_unit(row["paket"])
+        qty = num(row.get("qty"))
+        raw = str(row.get("satuan") or "").strip()
+        if not raw or qty <= 0:
+            continue
+        label_qty, from_unit, from_is_label = parse_multipack(raw)
+        to_label_qty, to_unit, to_is_label = parse_multipack(row.get("paket"))
+        norm.append(
+            {
+                "raw": raw,
+                "qty": qty,
+                "from_unit": from_unit,
+                "from_is_label": from_is_label,
+                "to_unit": to_unit,
+                "to_label_qty": to_label_qty,
+                "to_is_label": to_is_label,
+            }
+        )
+
+    if not norm:
+        return {}, "", "tanpa baris qty>0"
+
+    # 1) Satuan dasar = satuan Paket berupa satuan NYATA pada baris Qty/ = 1.
+    base_unit = ""
+    for row in norm:
+        if row["qty"] == 1 and row["to_unit"] and not row["to_is_label"]:
+            base_unit = row["to_unit"]
+            break
+    if not base_unit:
+        for row in norm:
+            if row["to_unit"] and not row["to_is_label"]:
+                base_unit = row["to_unit"]
+                break
+    # 2) Paket berlabel '@25 Kg' masih menyebut satuan (KG). Dipakai item yang
+    #    satu-satunya barisnya '@25 Kg | 1 | @25 Kg' (201M (25 KG), BURAS BMS).
+    if not base_unit:
+        for row in norm:
+            if row["to_is_label"] and row["to_unit"]:
+                base_unit = row["to_unit"]
+                break
+    if not base_unit:
+        return {}, "", "tidak ada satuan dasar yang bisa ditentukan"
+
+    # 3) Graf satuan biasa (tanpa '@') memberi faktor tiap satuan fisik.
+    edges: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for row in norm:
+        if row["from_is_label"]:
+            continue
+        frm = row["from_unit"]
+        to = row["to_unit"]
         if not frm or not to:
             continue
-        if frm == to:
+        value = row["qty"] * row["to_label_qty"]
+        if value <= 0:
             continue
-        # Satuan berawalan "@" (mis. "@5 SAK", "@25 Kg") BUKAN tier harga
-        # semata: iPOSS memakainya sebagai label satuan transaksi multipak.
-        #   Satuan="@5 SAK", Qty/=3, Paket=SAK  ->  1 transaksi = 15 SAK
-        # Jadi faktornya Qty/ x (label), bukan Qty/ saja. Baris level 1
-        # (mis. "SAK" 1 SAK) sudah memberi faktor 1, jadi label "@N X"
-        # melengkapi rantai, tidak menggantikannya.
-        label_qty = _multipack_qty(frm)
-        if label_qty:
-            edges[frm].append((to, row["qty"] * label_qty))
-            stats_skip["multipack"] += 1
+        if frm == to and abs(value - 1) < 1e-9:
             continue
-        edges[frm].append((to, row["qty"]))
+        edges[frm].append((to, value))
 
-    # faktor ke base dihitung mundur: telusuri dari base, kebalikan arah edge.
     factors: dict[str, float] = {base_unit: 1.0}
-    queue = [base_unit]
-    while queue:
-        cur = queue.pop(0)
-        for frm, opts in edges.items():
-            for to, qty in opts:
-                if frm == cur and to not in factors and qty:
-                    factors[to] = factors[cur] / qty
-                    queue.append(to)
-                elif to == cur and frm not in factors:
-                    factors[frm] = factors[cur] * qty
-                    queue.append(frm)
 
-    # unit yang muncul di data tapi tak terhubung ke base
-    for row in rows:
-        u = canon_unit(row["satuan"]) or _raw_unit(row["satuan"])
-        if not u or u.startswith("@"):
+    def resolve(unit: str, seen: frozenset) -> float:
+        if unit == base_unit:
+            return 1.0
+        if unit in factors:
+            return factors[unit]
+        if unit in seen:
+            return 0.0
+        for to, value in edges.get(unit, []):
+            if value <= 0:
+                continue
+            sub = resolve(to, seen | {unit})
+            if sub > 0:
+                factors[unit] = value * sub
+                return factors[unit]
+        return 0.0
+
+    for unit in list(edges):
+        resolve(unit, frozenset())
+
+    # 4) Faktor sel Paket: satuan nyata -> faktornya x, '@M' -> M, kosong -> 1.
+    def paket_factor(row) -> float:
+        if row["to_unit"]:
+            unit_factor = factors.get(row["to_unit"], 0.0)
+            if unit_factor <= 0:
+                return 0.0
+            return row["to_label_qty"] * unit_factor
+        if row["to_is_label"]:
+            return row["to_label_qty"]
+        return 1.0
+
+    out: dict[str, float] = {}
+    for row in norm:
+        pf = paket_factor(row)
+        if pf <= 0:
             continue
-        if u != base_unit and u not in factors:
-            problems.append(f"{u} tidak terhubung ke {base_unit}")
+        factor = round(row["qty"] * pf, 6)
+        if factor <= 0:
+            continue
+        if not row["from_is_label"]:
+            key = row["from_unit"]
+            if not key:
+                continue
+            if key == base_unit and abs(factor - 1) < 1e-9:
+                continue
+            if key == row["to_unit"] and abs(factor - 1) < 1e-9:
+                continue
+        else:
+            key = row["raw"]
+            if key == base_unit:
+                continue
+        out[key] = max(out.get(key, 0.0), factor)
 
-    factors.pop(base_unit)
-    # buang faktor yang tidak masuk akal
-    for u in list(factors):
-        if factors[u] <= 0 or factors[u] == 1:
-            factors.pop(u)
+    if not out:
+        return {}, base_unit, ""
 
-    if problems:
-        extra_note = (extra_note + " | " if extra_note else "") + (
-            "konflik: " + "; ".join(sorted(set(problems))[:3])
-        )
-    return factors, base_unit, extra_note
+    out.pop(base_unit, None)
+    return out, base_unit, ""
 
 
 def _stock_of(row: dict) -> float:
@@ -294,25 +366,6 @@ def _stock_of(row: dict) -> float:
 
 def _kg_chain(kg: float) -> dict:
     return {"KG": 1.0}
-
-
-def _multipack_qty(label: str) -> int:
-    """
-    Baca angka pada label satuan multipak iPOSS.
-
-    "@5 SAK" -> 5, "@3" -> 3, "@20 SAK" -> 20, "@25 Kg" -> 25.
-    Label tanpa angka -> 0 (bukan multipak).
-
-    Arti label: 1 transaksi "@N X" = N paket X. Karena pasangan label itu
-    selalu X = Paket, faktor ke satuan dasar = Qty/ x N.
-    """
-    m = re.match(r"@\s*(\d+)", str(label or "").strip())
-    return int(m.group(1)) if m else 0
-
-
-def _raw_unit(value) -> str:
-    raw = str(value or "").strip()
-    return raw.upper() if raw.startswith("@") else ""
 
 
 def main() -> None:

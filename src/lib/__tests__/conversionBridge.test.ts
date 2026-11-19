@@ -120,8 +120,9 @@ describe('rantai penuh: konversi mentah -> faktor', () => {
       items
     );
     const factors = buildUnitFactors(byItem.get('ITM-005230') || []);
-    // Relasi BAL->BAL diabaikan; tidak ada faktor lain, jadi tidak ada entri.
-    expect(factors['ITM-005230']).toBeUndefined();
+    // Relasi BAL->BAL diabaikan; tidak ada satuan lain yang terhubung, jadi
+    // hasilnya kosong (bukan { BAL: 1 }) dan pemanggil memakai UNIT_BASE item.
+    expect(factors['ITM-005230']).toEqual({});
   });
 
   it('GALAC ZOO: BAL=50 KG terbentuk dari data nyata', () => {

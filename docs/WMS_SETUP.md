@@ -119,8 +119,8 @@ paling tidak bisa dijadwalkan selalu di atas.
 
 Layar admin untuk memeriksa `UNIT_CONVERSION`. Setiap baris ditampilkan bersama
 **satuan efektif** dan **faktor ke satuan dasar**, sehingga salah tafsir
-multipak langsung kelihatan: `@5 SAK` dengan `Qty/ = 3` tampil sebagai
-`@5 → 15 SAK`.
+multipak langsung kelihatan: `@5 SAK` dengan `Qty/ = 5` tampil sebagai
+`@5 SAK → 5 SAK` (faktor = `Qty/`, bukan `Qty/ × 5` — lihat §13).
 
 Kolom yang bisa disunting: `FROM_UNIT`, `TO_UNIT`, `TO_UNIT_QTY`, `IS_ACTIVE`,
 `NOTES`. Penulisan dilakukan per-baris memakai `CONV_ID` (bukan tulis ulang
@@ -634,14 +634,16 @@ badan tempelan yang berbeda dari `src/lib/wms-stock.ts`).
 
 # 13. Satuan multipak "@N" — BUKAN duplikat
 
-Dikoreksi 18 Nov 2026 setelah koreksi langsung dari pemilik data.
+Dikoreksi 18 Nov 2026 setelah koreksi langsung dari pemilik data, lalu
+**diperbaiki ulang** pada hari yang sama setelah rumusnya terbukti salah.
 
-## Kesalahan yang diperbaiki
+> **Peringatan:** versi pertama §13 ini menulis bahwa faktornya `Qty/ × N`.
+> Itu **salah** dan sudah dibuang. `Qty/` sudah berisi N.
 
-Script pembuat master data membuang **semua** baris yang kolom `Satuan`-nya
-berawalan `@`, dengan alasan "tier harga iPOSS". Alasan itu **salah**.
+## Baris `@N` bukan duplikat
 
-Baris seperti ini bukan duplikat:
+Script lama membuang semua baris yang kolom `Satuan`-nya berawalan `@` dengan
+alasan "tier harga iPOSS". Alasan itu keliru.
 
 | Nama Barang | Satuan | Qty/ | Paket |
 |---|---|---|---|
@@ -651,75 +653,89 @@ Baris seperti ini bukan duplikat:
 | CAT CHOIZE KITTEN SALMON 20KG | @20 SAK | 20 | SAK |
 
 Empat baris itu punya **satuan berbeda**: `SAK`, `@3 SAK`, `@5 SAK`, `@20 SAK`.
-Artinya:
+Masing-masing adalah satuan transaksi nyata di iPOSS, jadi semuanya harus bisa
+dipilih saat menerima barang.
 
-- 1 transaksi SAK = 1 SAK
-- 1 transaksi `@3 SAK` = 3 SAK
-- 1 transaksi `@20 SAK` = 20 SAK
-
-Dan **satuan terkecilnya ada di kolom Paket = SAK** — sama seperti `BAL`/`SAK` pada
-item lain. Jadi tidak boleh dibuang, dan tidak boleh dianggap satuan besar palsu.
-
-## Aturan resmi
+## Aturan resmi — satu rumus saja
 
 ```
 1 [SATUAN] = [QTY/] [PAKET]
 ```
 
-Label `@N X` berarti **N paket X dalam satu transaksi**. Bila kolom `Paket` juga `X`,
-maka satuannya adalah X itu sendiri, dengan faktor N × (Qty/).
+`Qty/` **sudah** berisi jumlah satuan tujuan per satu satuan transaksi.
+Jangan dikalikan lagi dengan angka pada label `@N`.
 
-Satuan dasar sebuah item **selalu** diambil dari kolom `Paket` pada baris `Qty/ = 1`.
-Tidak pernah ditebak dari nama satuan.
+| Satuan | Qty/ | Paket | Arti | Faktor ke satuan dasar |
+|---|---|---|---|---|
+| PCS | 1 | PCS | 1 transaksi = 1 PCS | 1 |
+| `@6` | 6 | PCS | 1 transaksi = 6 PCS | 6 |
+| `SAK` | 20 | PCS | 1 transaksi = 20 PCS | 20 |
+| `@3 SAK` | 60 | PCS | 1 transaksi = 60 PCS | 60 |
+| `DUS` | 50 | PCS | 1 transaksi = 50 PCS | 50 |
+| `@25 DUS` | 1250 | PCS | 1 transaksi = 1.250 PCS | 1250 |
+| `@25 Kg` | 1 | `@25 Kg` | 1 transaksi = 25 KG | 25 |
 
-## Bukti dari data
+Satuan dasar sebuah item **selalu** diambil dari kolom `Paket` pada baris
+`Qty/ = 1`, tidak pernah ditebak dari nama satuan (`BAL`/`SAK` bisa jadi satuan
+terkecil sekaligus satuan transaksi).
 
-Pemeriksaan langsung ke `Master Data Konversi.xlsx` (sheet `Sheet`):
+## Bukti dari data (18 Nov 2026)
+
+Sumber: `Master Data Konversi.xlsx`, hanya sheet **`Sheet`**
+(`Sheet (2)` dan `Sheet (3)` bukan data yang dipakai).
 
 | Kenyataan | Jumlah |
 |---|---|
-| Baris memakai label `@` | **2.800+ baris** (mayoritas item punya beberapa) |
-| Baris `@` yang selamat ke `UNIT_CONVERSION` | **0** |
-| Baris `@` tersisa hanya di kolom NOTES | 61 |
+| Baris data | 23.661 |
+| Item unik | 8.788 |
+| Baris `Satuan` berlabel `@` | 12.126 |
+| Nilai `Paket` berlabel `@` | 88 (8 label) |
+| Baris konversi dihasilkan | **14.884** |
+| Di antaranya multipak `@N` | **12.111** |
 
-Artinya seluruh item kehilangan varian multipaknya. Contoh nyata: setiap barang
-retail punya `PCS` 1, `@3` 3, `@6` 6, `@12` 12 — semuanya hilang.
+Seluruh 8.788 item sudah diuji ulang: tidak ada lagi item yang kehilangan
+konversi karena label `@` dibuang.
 
 ## Yang berubah
 
-1. `tools/wms/build_masters.py` — baris `@` sekarang **dibaca**, bukan dibuang.
-   Faktornya `Qty/ × N`, dan labelnya dipetakan ke satuan di kolom Paket
-   (mis. `@5 SAK` → `SAK`, faktor 5).
-2. `src/lib/wms-stock.ts` — `parseMultiPackLabel()` membaca `@N X`, dan
-   `buildUnitFactors()` mengalikan `Qty/` dengan N. Tanpa ini, workbook yang
-   di-upload ulang akan tetap menyimpan satuan palsu `@5 SAK`.
-3. Label `@N X` **tidak pernah** muncul sebagai pilihan satuan di form.
+1. `tools/wms/build_masters.py` — `parse_multipack()` membaca sel `@N X`, dan
+   `build_conversion_chain()` memakai `1 [Satuan] = Qty/ [Paket]`.
+   Label `@N` **disimpan apa adanya** sebagai `FROM_UNIT`.
+2. `src/lib/wms-stock.ts` — `parseMultiPackLabel()` membaca `@N X`,
+   `resolveFactors()` menghitung faktor dengan rumus yang sama, dan
+   `buildUnitOptions()` menampilkan label `@N` sebagai pilihan satuan.
+3. Test regresi memakai baris asli: `src/lib/__tests__/multipack.test.ts`
+   (contoh per item) dan `src/lib/__tests__/conversionCatalog.test.ts`
+   (seluruh 8.788 item dari workbook sumber).
 
-## Status saat ini — PERLU TINDAKAN
+## Bentuk data setelah perbaikan
 
-Workbook `WMS_Database.xlsx` yang sekarang dipakai masih versi lama: 0 baris `@`.
-Kode sudah siap, tetapi datanya belum. Jadi sampai spreadsheet diperbarui:
+```
+FROM_UNIT    TO_UNIT  TO_UNIT_QTY
+@3 SAK       SAK      3
+@5 SAK       SAK      5
+@20 SAK      SAK      20
+```
 
-- Item seperti CAT CHOIZE KITTEN SALMON 20KG **tetap benar** → satuan dasar SAK,
-  pilihan hanya SAK. Tidak ada salah hitung.
-- Yang belum muncul: varian multipak (`@3 SAK`, `@5 SAK`, `@20 SAK`) sebagai
-  pilihan satuan saat menerima barang.
+Pada form terima barang, pilihan satuannya menjadi:
 
-Untuk mengaktifkannya, `Master Data Konversi.xlsx` perlu dibangun ulang dengan
-script yang sudah diperbaiki, lalu workbook-nya di-upload ulang.
+```
+SAK  ·  @3 SAK  ·  @5 SAK  ·  @20 SAK
+```
 
-Layar **Master Konversi** (`Master Konversi` di sidebar) menampilkan hitungan
-`baris multipak @N` di kartu atas. Selama angkanya masih **0**, berarti
-workbook belum diperbarui — kode sudah siap, datanya belum.
-
-Untuk item yang jumlahnya sedikit, baris `@N` bisa ditambahkan manual lewat
-layar tersebut (tombol pensil). Untuk seluruh katalog, bangun ulang workbook:
+## Membangun ulang workbook
 
 ```bash
-# setelah Master Data Konversi.xlsx ada di google_drive/
+# kedua file sumber harus ada di google_drive/
+#   Master Data Stock.xlsx     (tab "MS Details")
+#   Master Data Konversi.xlsx  (tab "Sheet")
 python3 tools/wms/build_masters.py
 python3 tools/wms/build_workbook.py
 ```
 
-lalu unggah `WMS_Database.xlsx` ke Google Drive dan salin isinya ke spreadsheet
-WMS (`WMS_SPREADSHEET_ID`).
+lalu unggah `templates/google-sheets/wms/WMS_Database.xlsx` ke Google Drive dan
+salin isinya ke spreadsheet WMS (`WMS_SPREADSHEET_ID`).
+
+Perbaikan manual per item tetap bisa lewat layar **Master Konversi** (tombol
+pensil), tetapi jangan menambah baris `@N` secara manual untuk seluruh katalog —
+bangun ulang workbook supaya angkanya konsisten dengan sumber.
