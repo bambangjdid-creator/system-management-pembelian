@@ -24,6 +24,8 @@ import PDFDocument from "pdfkit";
 // ===========================================================================
 
 // ===========================================================================
+
+// ===========================================================================
 // Perhitungan stok WMS — SENGAJA DITEMPEL DI SINI, BUKAN DIIMPOR.
 //
 // Vercel meng-compile api/server.ts sendiri menjadi /var/task/api/server.js
@@ -711,6 +713,26 @@ type BridgedConversion = {
 
 function normalizeNameKey(value: unknown): string {
   return wmsToText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Penanda barang discontinued pada nama barang iPOSS.
+ *
+ * Konvensi pemilik data: nama yang mengandung `(DC)` adalah barang yang sudah
+ * DISCONTINUE / tidak aktif. Contoh nyata:
+ *
+ *   "(DC) 220 VOLT ON FIRE LB (48)"   -> discontinued
+ *   "(DC ) FURKIDO FLEA & TICK ..."   -> discontinued (spasi di dalam kurung)
+ *   "CAT CHOIZE KITTEN SALMON 20KG"   -> aktif
+ *
+ * Hanya `(DC)` yang berdiri sebagai penanda yang dihitung. Teks lain yang
+ * kebetulan mengandung "DC" (mis. "DC MOTOR") tidak boleh ikut tertandai,
+ * karena itu bagian nama barang, bukan status.
+ */
+const DISCONTINUED_NAME_RE = /\(\s*DC\s*\)/i;
+
+function isDiscontinuedName(itemName: unknown): boolean {
+  return DISCONTINUED_NAME_RE.test(wmsToText(itemName));
 }
 
 function bridgeConversionsToItems(
@@ -3908,9 +3930,13 @@ function describeConversionRows(auth: any) {
         const effectiveQty = multi ? qty * multi.qty : qty;
         const isActive = (row.IS_ACTIVE || "Y").toUpperCase() === "Y";
 
+        // Barang berlabel (DC) sudah discontinued di iPOSS. Barisnya TETAP
+        // ditampilkan supaya riwayat konversinya bisa diperiksa, tetapi
+        // ditandai agar tidak dikira barang yang masih dijual.
+        const itemDiscontinued = isDiscontinuedName(row.ITEM_NAME);
+
         const problems: string[] = [];
-        if (!row.ITEM_ID) problems.push("ITEM_ID kosong");
-        if (!fromRaw) problems.push("FROM_UNIT kosong");
+        if (!row.ITEM_ID) problems.push("ITEM_ID kosong");        if (!fromRaw) problems.push("FROM_UNIT kosong");
         if (!to) problems.push("TO_UNIT kosong");
         if (qty <= 0) problems.push("TO_UNIT_QTY harus > 0");
         if (fromRaw && to && effectiveFrom === to && effectiveQty === 1) {
@@ -3926,6 +3952,8 @@ function describeConversionRows(auth: any) {
           toUnit: to,
           toUnitQty: qty,
           isActive,
+          itemDiscontinued,
+          effectiveActive: isActive && !itemDiscontinued,
           notes: row.NOTES || "",
           isMultiPack: Boolean(multi),
           multiPackQty: multi ? multi.qty : 0,
@@ -3974,9 +4002,11 @@ app.get("/api/wms/conversions", async (req, res) => {
 
     const { conversions, factorsByItem, duplicateRawNames } = await describeConversionRows(auth);
 
+    // Filter "Hanya aktif" memakai status EFEKTIF: baris non-aktif DAN baris
+    // milik barang (DC) sama-sama barang yang sudah tidak dipakai lagi.
     let filtered = conversions;
-    if (active === "Y") filtered = filtered.filter((row) => row.isActive);
-    else if (active === "N") filtered = filtered.filter((row) => !row.isActive);
+    if (active === "Y") filtered = filtered.filter((row) => row.effectiveActive);
+    else if (active === "N") filtered = filtered.filter((row) => !row.effectiveActive);
     if (onlyProblems) filtered = filtered.filter((row) => row.problems.length > 0);
     if (q) {
       filtered = filtered.filter(
@@ -3995,6 +4025,12 @@ app.get("/api/wms/conversions", async (req, res) => {
       problems: conversions.filter((row) => row.problems.length > 0).length,
       itemsWithConversion: Object.keys(factorsByItem).length,
       duplicateRawNames: duplicateRawNames.size,
+      // Baris milik barang (DC) = sudah discontinued, bukan kesalahan data.
+      discontinued: conversions.filter((row) => row.itemDiscontinued).length,
+      discontinuedItems: new Set(
+        conversions.filter((row) => row.itemDiscontinued).map((row) => row.itemId || row.itemName)
+      ).size,
+      activeAfterDiscontinued: conversions.filter((row) => row.effectiveActive).length,
     };
 
     res.json({

@@ -739,3 +739,54 @@ salin isinya ke spreadsheet WMS (`WMS_SPREADSHEET_ID`).
 Perbaikan manual per item tetap bisa lewat layar **Master Konversi** (tombol
 pensil), tetapi jangan menambah baris `@N` secara manual untuk seluruh katalog —
 bangun ulang workbook supaya angkanya konsisten dengan sumber.
+
+---
+
+# 14. Barang discontinued `(DC)` — ditandai, BUKAN disembunyikan
+
+Nama barang yang mengandung `(DC)` adalah barang yang sudah **DISCONTINUE /
+tidak aktif** di iPOSS. Sumber kebenarannya `STATUS_IPOS`, dan pemetaannya rapi
+1:1 pada katalog sekarang:
+
+| Cek | Jumlah |
+|---|---|
+| Item total | 8.789 |
+| Nama berlabel `(DC)` | 4.894 |
+| `(DC)` dengan `IS_ACTIVE = Y` | **0** |
+| `(DC)` dengan `STATUS_IPOS = Discontinue` | 4.894 (semua) |
+| Discontinue tanpa label `(DC)` | **0** |
+| Item aktif (`IS_ACTIVE = Y`) | 3.895 |
+
+Karena itu label `(DC)` dipakai sebagai penanda tampilan, sedangkan status
+sebenarnya tetap dibaca dari `IS_ACTIVE`/`STATUS_IPOS`.
+
+## Yang sengaja TIDAK dilakukan
+
+Baris konversi milik barang `(DC)` **tidak disembunyikan**. Menghapusnya dari
+layar akan menghilangkan riwayat barang yang stoknya mungkin masih ada di
+gudang. Yang dilakukan adalah menandainya.
+
+## Perilaku layar sekarang
+
+| Layar | Perilaku |
+|---|---|
+| Master Konversi | baris `(DC)` tetap tampil, diberi badge abu-abu **BARANG (DC)** di kolom Status |
+| Master Konversi — kartu | kartu **Baris barang (DC)** = 7.834 baris / 3.138 barang |
+| Master Konversi — filter | "Hanya aktif" memakai status efektif (baris aktif **dan** barang bukan `(DC)`) |
+| Saldo stok / Expiry Monitor | barang `(DC)` tetap tampil bila masih ada stok |
+| `/api/wms/items` | default tetap menyembunyikan barang non-aktif |
+
+Bentuk data di `GET /api/wms/conversions`:
+
+```jsonc
+{
+  "isActive": true,          // status baris konversi (UNIT_CONVERSION.IS_ACTIVE)
+  "itemDiscontinued": true,  // barang berlabel (DC)
+  "effectiveActive": false,  // isActive && !itemDiscontinued
+  "stats": { "discontinued": 7834, "discontinuedItems": 3138, "activeAfterDiscontinued": 7050 }
+}
+```
+
+Fungsi pendeteksinya `isDiscontinuedName()` di `src/lib/wms-stock.ts`; hanya
+`(DC)` yang berdiri sendiri yang dihitung, jadi nama seperti `DC MOTOR 12V`
+tidak ikut tertandai. Test regresinya `src/lib/__tests__/discontinuedItem.test.ts`.

@@ -25,6 +25,10 @@ type Conversion = {
   multiPackQty: number;
   effectiveFromUnit: string;
   effectiveToUnitQty: number;
+  /** Barang berlabel (DC) = sudah discontinued di iPOSS. */
+  itemDiscontinued: boolean;
+  /** Aktif secara efektif: barisnya aktif DAN barangnya bukan (DC). */
+  effectiveActive: boolean;
   problems: string[];
   factors: Record<string, number>;
 };
@@ -36,6 +40,9 @@ type Stats = {
   problems: number;
   itemsWithConversion: number;
   duplicateRawNames: number;
+  discontinued: number;
+  discontinuedItems: number;
+  activeAfterDiscontinued: number;
 };
 
 type ConversionResponse = {
@@ -162,6 +169,12 @@ export default function ConversionMaster({ apiFetch }: Props) {
     return [
       { label: 'Baris konversi', value: fmt(stats.total), tone: 'text-slate-900 dark:text-slate-100' },
       { label: 'Aktif', value: fmt(stats.active), tone: 'text-emerald-600' },
+      {
+        label: 'Baris barang (DC)',
+        value: fmt(stats.discontinued),
+        tone: stats.discontinued ? 'text-amber-600' : 'text-slate-500',
+        hint: `${fmt(stats.discontinuedItems)} barang discontinued`,
+      },
       { label: 'Item terkonversi', value: fmt(stats.itemsWithConversion), tone: 'text-slate-900 dark:text-slate-100' },
       { label: 'Baris multipak @N', value: fmt(stats.multiPack), tone: 'text-blue-600' },
       { label: 'Baris bermasalah', value: fmt(stats.problems), tone: stats.problems ? 'text-red-600' : 'text-slate-500' },
@@ -194,8 +207,8 @@ export default function ConversionMaster({ apiFetch }: Props) {
             onChange={(e) => setActive(e.target.value as 'all' | 'Y' | 'N')}
             className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/30"
           >
-            <option value="Y">Hanya aktif</option>
-            <option value="N">Hanya non-aktif</option>
+            <option value="Y">Hanya aktif (tanpa barang DC)</option>
+            <option value="N">Hanya non-aktif (termasuk barang DC)</option>
             <option value="all">Semua</option>
           </select>
           <button
@@ -217,7 +230,7 @@ export default function ConversionMaster({ apiFetch }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         {cards.map((card) => (
           <div
             key={card.label}
@@ -225,6 +238,7 @@ export default function ConversionMaster({ apiFetch }: Props) {
           >
             <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{card.label}</p>
             <p className={`text-lg font-black mt-1 ${card.tone}`}>{card.value}</p>
+            {card.hint && <p className="mt-0.5 text-[10px] text-slate-400">{card.hint}</p>}
           </div>
         ))}
       </div>
@@ -383,6 +397,14 @@ export default function ConversionMaster({ apiFetch }: Props) {
                         }`}
                       >
                         {row.isActive ? 'AKTIF' : 'NON-AKTIF'}
+                      </span>
+                    )}
+                    {row.itemDiscontinued && (
+                      <span
+                        title="Barang ini sudah discontinued (nama berlabel (DC)). Baris konversinya tetap disimpan sebagai riwayat."
+                        className="ml-1 inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-dashed border-slate-300"
+                      >
+                        BARANG (DC)
                       </span>
                     )}
                   </td>
