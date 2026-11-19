@@ -558,3 +558,81 @@ Ini yang benar: satuannya memang BAL, bukan 50 PCS.
 `api/` sebagai fungsi serverless. Berkas kedua di sana membuat deployment memiliki
 **2 fungsi**, bukan 1, dan seluruh `/api/*` menjadi 500. Sekarang `api/` hanya berisi
 `server.ts`.
+
+---
+
+# 13. Satuan multipak "@N" — BUKAN duplikat
+
+Dikoreksi 18 Nov 2026 setelah koreksi langsung dari pemilik data.
+
+## Kesalahan yang diperbaiki
+
+Script pembuat master data membuang **semua** baris yang kolom `Satuan`-nya
+berawalan `@`, dengan alasan "tier harga iPOSS". Alasan itu **salah**.
+
+Baris seperti ini bukan duplikat:
+
+| Nama Barang | Satuan | Qty/ | Paket |
+|---|---|---|---|
+| CAT CHOIZE KITTEN SALMON 20KG | SAK | 1 | SAK |
+| CAT CHOIZE KITTEN SALMON 20KG | @3 SAK | 3 | SAK |
+| CAT CHOIZE KITTEN SALMON 20KG | @5 SAK | 5 | SAK |
+| CAT CHOIZE KITTEN SALMON 20KG | @20 SAK | 20 | SAK |
+
+Empat baris itu punya **satuan berbeda**: `SAK`, `@3 SAK`, `@5 SAK`, `@20 SAK`.
+Artinya:
+
+- 1 transaksi SAK = 1 SAK
+- 1 transaksi `@3 SAK` = 3 SAK
+- 1 transaksi `@20 SAK` = 20 SAK
+
+Dan **satuan terkecilnya ada di kolom Paket = SAK** — sama seperti `BAL`/`SAK` pada
+item lain. Jadi tidak boleh dibuang, dan tidak boleh dianggap satuan besar palsu.
+
+## Aturan resmi
+
+```
+1 [SATUAN] = [QTY/] [PAKET]
+```
+
+Label `@N X` berarti **N paket X dalam satu transaksi**. Bila kolom `Paket` juga `X`,
+maka satuannya adalah X itu sendiri, dengan faktor N × (Qty/).
+
+Satuan dasar sebuah item **selalu** diambil dari kolom `Paket` pada baris `Qty/ = 1`.
+Tidak pernah ditebak dari nama satuan.
+
+## Bukti dari data
+
+Pemeriksaan langsung ke `Master Data Konversi.xlsx` (sheet `Sheet`):
+
+| Kenyataan | Jumlah |
+|---|---|
+| Baris memakai label `@` | **2.800+ baris** (mayoritas item punya beberapa) |
+| Baris `@` yang selamat ke `UNIT_CONVERSION` | **0** |
+| Baris `@` tersisa hanya di kolom NOTES | 61 |
+
+Artinya seluruh item kehilangan varian multipaknya. Contoh nyata: setiap barang
+retail punya `PCS` 1, `@3` 3, `@6` 6, `@12` 12 — semuanya hilang.
+
+## Yang berubah
+
+1. `tools/wms/build_masters.py` — baris `@` sekarang **dibaca**, bukan dibuang.
+   Faktornya `Qty/ × N`, dan labelnya dipetakan ke satuan di kolom Paket
+   (mis. `@5 SAK` → `SAK`, faktor 5).
+2. `src/lib/wms-stock.ts` — `parseMultiPackLabel()` membaca `@N X`, dan
+   `buildUnitFactors()` mengalikan `Qty/` dengan N. Tanpa ini, workbook yang
+   di-upload ulang akan tetap menyimpan satuan palsu `@5 SAK`.
+3. Label `@N X` **tidak pernah** muncul sebagai pilihan satuan di form.
+
+## Status saat ini — PERLU TINDAKAN
+
+Workbook `WMS_Database.xlsx` yang sekarang dipakai masih versi lama: 0 baris `@`.
+Kode sudah siap, tetapi datanya belum. Jadi sampai spreadsheet diperbarui:
+
+- Item seperti CAT CHOIZE KITTEN SALMON 20KG **tetap benar** → satuan dasar SAK,
+  pilihan hanya SAK. Tidak ada salah hitung.
+- Yang belum muncul: varian multipak (`@3 SAK`, `@5 SAK`, `@20 SAK`) sebagai
+  pilihan satuan saat menerima barang.
+
+Untuk mengaktifkannya, `Master Data Konversi.xlsx` perlu dibangun ulang dengan
+script yang sudah diperbaiki, lalu workbook-nya di-upload ulang.

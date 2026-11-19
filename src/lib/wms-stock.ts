@@ -74,6 +74,28 @@ const toText = (value: unknown): string => String(value ?? "").trim();
  * (BAL -> DUS x12, DUS -> PCS x20). Fungsi ini menggabungkan keduanya
  * sehingga BAL -> PCS = 240 tanpa perlu tabel tambahan.
  */
+/**
+ * Baca label satuan multipak iPOSS.
+ *
+ * iPOSS memakai kolom Satuan seperti: "SAK", "@3 SAK", "@5 SAK", "@20 SAK".
+ * Artinya 1 transaksi "@5 SAK" = 5 paket SAK. Dipadukan dengan kolom Qty/:
+ *
+ *   Satuan   Qty/  Paket
+ *   SAK      1     SAK    -> 1 transaksi = 1 SAK
+ *   @3 SAK   3     SAK    -> 1 transaksi = 3 SAK
+ *   @20 SAK  20    SAK    -> 1 transaksi = 20 SAK
+ *
+ * Karena Paket selalu "SAK", satuan dasar tetap SAK dan TIDAK perlu ditebak.
+ */
+export function parseMultiPackLabel(label: string): { qty: number; unit: string } | null {
+  const raw = toText(label).toUpperCase();
+  const match = /^@\s*(\d+)\s*([A-Z]*)$/.exec(raw);
+  if (!match) return null;
+  const qty = Number(match[1]);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  return { qty, unit: match[2] || "" };
+}
+
 export function buildUnitFactors(
   conversions: ConversionRow[]
 ): Record<string, Record<string, number>> {
@@ -82,11 +104,24 @@ export function buildUnitFactors(
 
   for (const row of conversions) {
     const itemId = toText(row.itemId).toUpperCase();
-    const from = toText(row.fromUnit).toUpperCase();
+    const rawFrom = toText(row.fromUnit).toUpperCase();
     const to = toText(row.toUnit).toUpperCase();
-    const factor = toNumber(row.toUnitQty);
-    if (!itemId || !from || !to || factor <= 0) continue;
+    let factor = toNumber(row.toUnitQty);
+    if (!itemId || !rawFrom || !to || factor <= 0) continue;
     if (row.isActive === false) continue;
+
+    // "@5 SAK" dengan Qty/=3 berarti 3 x 5 = 15 SAK, bukan 3.
+    // Satuan tetap dibaca sebagai SAK supaya rantainya menyatu dengan
+    // baris level 1 ("SAK" 1 SAK) dan tidak muncul satuan palsu "@5 SAK".
+    let from = rawFrom;
+    const multi = parseMultiPackLabel(rawFrom);
+    if (multi) {
+      factor = factor * multi.qty;
+      from = multi.unit || to;
+    }
+
+    if (from === to && factor === 1) continue;
+
     (byItem[itemId] = byItem[itemId] || []).push({
       ...row,
       fromUnit: from,

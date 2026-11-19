@@ -240,10 +240,16 @@ def build_conversion_chain(rows: list[dict]) -> tuple[dict, str, str]:
             continue
         if frm == to:
             continue
-        # Satuan berawalan "@" (mis. "@5 SAK") adalah TIER HARGA di iPOSS,
-        # bukan satuan fisik. Tidak boleh masuk tabel konversi stok.
-        if frm.startswith("@") or to.startswith("@"):
-            stats_skip["tier_harga"] += 1
+        # Satuan berawalan "@" (mis. "@5 SAK", "@25 Kg") BUKAN tier harga
+        # semata: iPOSS memakainya sebagai label satuan transaksi multipak.
+        #   Satuan="@5 SAK", Qty/=3, Paket=SAK  ->  1 transaksi = 15 SAK
+        # Jadi faktornya Qty/ x (label), bukan Qty/ saja. Baris level 1
+        # (mis. "SAK" 1 SAK) sudah memberi faktor 1, jadi label "@N X"
+        # melengkapi rantai, tidak menggantikannya.
+        label_qty = _multipack_qty(frm)
+        if label_qty:
+            edges[frm].append((to, row["qty"] * label_qty))
+            stats_skip["multipack"] += 1
             continue
         edges[frm].append((to, row["qty"]))
 
@@ -288,6 +294,20 @@ def _stock_of(row: dict) -> float:
 
 def _kg_chain(kg: float) -> dict:
     return {"KG": 1.0}
+
+
+def _multipack_qty(label: str) -> int:
+    """
+    Baca angka pada label satuan multipak iPOSS.
+
+    "@5 SAK" -> 5, "@3" -> 3, "@20 SAK" -> 20, "@25 Kg" -> 25.
+    Label tanpa angka -> 0 (bukan multipak).
+
+    Arti label: 1 transaksi "@N X" = N paket X. Karena pasangan label itu
+    selalu X = Paket, faktor ke satuan dasar = Qty/ x N.
+    """
+    m = re.match(r"@\s*(\d+)", str(label or "").strip())
+    return int(m.group(1)) if m else 0
 
 
 def _raw_unit(value) -> str:
@@ -515,6 +535,7 @@ def main() -> None:
 
     print("=== RINGKASAN MIGRASI ===")
     stats["baris_tier_harga_diabaikan"] = stats_skip["tier_harga"]
+    stats["baris_multipak_dibaca"] = stats_skip["multipack"]
     for k, v in sorted(stats.items()):
         print(f"  {k:22} {v}")
     print(f"\n  kategori             {len(cats)}")
