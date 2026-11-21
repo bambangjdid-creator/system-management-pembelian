@@ -1,0 +1,35 @@
+<!--
+  ===================================================================
+  INDEX HEIGHT BRIDGE
+  Tempel di Index.html (Apps Script), tepat sebelum </body>
+  Gunanya: melaporkan tinggi konten ke halaman Blogger yang meng-iframe-kan,
+  supaya iframe tidak punya scrollbar sendiri (menghindari double scroll
+  di HP). Aman bila halaman dibuka langsung (bukan iframe).
+  ===================================================================
+-->
+<script>
+(function () {
+  function post() {
+    var h = Math.ceil(Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight
+    ));
+    try { parent.postMessage({ type: 'bbm:height', height: h }, '*'); } catch (e) {}
+  }
+
+  if (window.ResizeObserver) {
+    new ResizeObserver(post).observe(document.body);
+  }
+  window.addEventListener('load', post);
+  window.addEventListener('orientationchange', post);
+
+  /* Jaring-jaring: panel accordion / chart bisa berubah tinggi tanpa resize */
+  var last = -1;
+  setInterval(function () {
+    var h = Math.ceil(document.body.scrollHeight);
+    if (Math.abs(h - last) < 8) return;
+    last = h;
+    post();
+  }, 1200);
+})();
+</script>

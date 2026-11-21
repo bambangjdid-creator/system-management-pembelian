@@ -1,0 +1,585 @@
+/**
+ * Aplikasi Pencatatan BBM - Backend (Enterprise Edition v7)
+ * Fix: Full Analysis Table (Actual vs Standard), Odometer Tracking
+ * NEW v7: - Notifikasi jatuh tempo STNK / KIR / GANTI PLAT / SIM
+ *         - Tambah & Edit lengkap DATA SUPIR (6 kolom) dan DATA ARMADA (9 kolom)
+ *         - Semua fungsi lama TIDAK DIUBAH agar fitur existing tetap aman
+ */
+
+const CONFIG = {
+  SHEET_BBM: "BBM",
+  SHEET_ARMADA: "DATA ARMADA",
+  SHEET_SUPIR: "DATA SUPIR",
+  SHEET_LOKASI: "LOKASI PENGISIAN",
+  SHEET_MASTER_BBM: "MASTER BBM",
+  FOLDER_NAME: "Foto Struk BBM"
+};
+
+/* ==========================================================
+   NEW v7: PETA KOLOM TANGGAL & ANGKA (index mulai dari 0)
+   DATA SUPIR : E(4) = Tanggal SIM
+   DATA ARMADA: C(2),D(3) angka | G(6)=STNK, H(7)=KIR, I(8)=Ganti Plat
+   ========================================================== */
+const DATE_COLS = {
+  "DATA SUPIR": [4],
+  "DATA ARMADA": [6, 7, 8]
+};
+const NUM_COLS = {
+  "DATA ARMADA": [2, 3]
+};
+
+function getTz_() {
+  try { return Session.getScriptTimeZone() || "Asia/Jakarta"; }
+  catch (e) { return "Asia/Jakarta"; }
+}
+
+/* NEW v7: Date -> string "yyyy-MM-dd" (aman dikirim ke frontend) */
+function toDateStr_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, getTz_(), "yyyy-MM-dd");
+  if (typeof v === "string" && /^\d{4}-\d{1,2}-\d{1,2}/.test(v.trim())) {
+    const p = v.trim().split("-");
+    return p[0] + "-" + ("0" + p[1]).slice(-2) + "-" + ("0" + p[2]).slice(-2);
+  }
+  // NEW v8: dukung format teks "d/M/yy" / "d/M/yyyy" / "d-M-yyyy" (jika sel bukan tipe Date)
+  if (typeof v === "string") {
+    const m = v.trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (m) {
+      let y = +m[3];
+      if (y < 100) y += 2000;
+      return y + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2);
+    }
+  }
+  return (v === null || v === undefined) ? "" : String(v);
+}
+
+/* NEW v7: string "yyyy-MM-dd" -> objek Date (jam 12 agar aman zona waktu) */
+function parseDateValue_(v) {
+  if (v === null || v === undefined || v === "") return "";
+  if (v instanceof Date) return v;
+  const m = String(v).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0);
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? v : d;
+}
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('BBM Logistik Pro')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ==========================================
+// API GET MASTER DATA (FULL MULTI-KOLOM) - v7: kolom diperluas + tanggal di-string-kan
+// ==========================================
+function getDropdownData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Fungsi pintar untuk mengambil seluruh kolom beserta Nomor Baris
+    const getFullData = (sheetName, numCols) => {
+      const sheet = ss.getSheetByName(sheetName);
+      if (!sheet) return [];
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 2) return [];
+      const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+      return data.map((row, index) => ({ rowId: index + 2, data: row }))
+                 .filter(item => item.data[0] !== ""); // Filter baris kosong (Soft Delete)
+    };
+
+    // NEW v7: konversi kolom tanggal menjadi string yyyy-MM-dd
+    const stringifyDates = (rows, sheetName) => {
+      const dCols = DATE_COLS[sheetName] || [];
+      return rows.map(item => {
+        const data = item.data.slice();
+        dCols.forEach(i => { if (i < data.length) data[i] = toDateStr_(data[i]); });
+        return { rowId: item.rowId, data: data };
+      });
+    };
+
+    // Sesuaikan jumlah kolom berdasarkan format Sheet Anda (v7: SUPIR 6 kolom, ARMADA 9 kolom)
+    const supirFull = stringifyDates(getFullData("DATA SUPIR", 6), "DATA SUPIR");
+    const platFull  = stringifyDates(getFullData("DATA ARMADA", 9), "DATA ARMADA");
+    const spbuFull = getFullData("LOKASI PENGISIAN", 4); 
+    const bbmFull = getFullData("MASTER BBM", 3); // Jenis, Tipe, Harga
+
+    return {
+      status: 'success',
+      data: {
+        supirFull: supirFull, platFull: platFull, spbuFull: spbuFull, bbmFull: bbmFull,
+        // (Tetap simpan data lama agar Form Input BBM tidak rusak)
+        supir: supirFull.map(x => x.data[1]),
+        plat: platFull.map(x => x.data[0]),
+        spbu: spbuFull.map(x => x.data[1]),
+        bbm: bbmFull.map(x => x.data)
+      }
+    };
+  } catch (error) {
+    return { status: 'error', message: error.toString() };
+  }
+}
+
+// ==========================================
+// API EDIT & SOFT DELETE MASTER DATA (LAMA - TIDAK DIUBAH)
+// ==========================================
+function editMasterData(sheetName, rowId, colDataArray) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    for(let i = 0; i < colDataArray.length; i++) {
+      if(colDataArray[i] !== null && colDataArray[i] !== undefined) {
+         sheet.getRange(rowId, i + 1).setValue(colDataArray[i]);
+      }
+    }
+    return { status: 'success' };
+  } catch (e) { return { status: 'error', message: e.toString() }; }
+}
+
+function deleteMasterDataAction(sheetName, rowId) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    // SOFT DELETE: Menghapus isi konten tanpa menghancurkan struktur baris
+    sheet.getRange(rowId, 1, 1, sheet.getLastColumn()).clearContent();
+    return { status: 'success' };
+  } catch (e) { return { status: 'error', message: e.toString() }; }
+}
+
+// ==========================================
+// NEW v7: SIMPAN BARIS (EDIT FULL) DENGAN KONVERSI TANGGAL & ANGKA
+// nilai null/undefined = sel TIDAK disentuh (aman utk kolom formula Rata-rata KM/L)
+// ==========================================
+function saveMasterRow(sheetName, rowId, values) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) return { status: 'error', message: 'Sheet tidak ditemukan: ' + sheetName };
+    const dCols = DATE_COLS[sheetName] || [];
+    const nCols = NUM_COLS[sheetName] || [];
+    for (let i = 0; i < values.length; i++) {
+      let v = values[i];
+      if (v === null || v === undefined) continue;              // lewati: jangan sentuh sel
+      if (dCols.indexOf(i) > -1)      v = parseDateValue_(v);   // simpan sebagai Date asli
+      else if (nCols.indexOf(i) > -1) v = (v === "") ? "" : (isNaN(parseFloat(v)) ? v : parseFloat(v));
+      sheet.getRange(rowId, i + 1).setValue(v);
+    }
+    return { status: 'success' };
+  } catch (e) { return { status: 'error', message: e.toString() }; }
+}
+
+// ==========================================
+// NEW v7: TAMBAH BARIS BARIS (ADD FULL) UNTUK SUPIR & ARMADA
+// ==========================================
+function addMasterRow(sheetName, values) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) return { status: 'error', message: 'Sheet tidak ditemukan: ' + sheetName };
+    const row = values.slice();
+    const dCols = DATE_COLS[sheetName] || [];
+    const nCols = NUM_COLS[sheetName] || [];
+
+    if (sheetName === CONFIG.SHEET_SUPIR) {
+      if (!row[1] || String(row[1]).trim() === "") return { status: 'error', message: 'Nama Supir wajib diisi!' };
+      if (!row[0] || String(row[0]).trim() === "") row[0] = "SPR-" + Math.floor(1000 + Math.random() * 9000);
+    }
+    if (sheetName === CONFIG.SHEET_ARMADA) {
+      if (!row[0] || String(row[0]).trim() === "") return { status: 'error', message: 'Nomor Plat wajib diisi!' };
+    }
+
+    for (let i = 0; i < row.length; i++) {
+      let v = row[i];
+      if (v === null || v === undefined) { row[i] = ""; continue; }
+      if (dCols.indexOf(i) > -1)      v = parseDateValue_(v);
+      else if (nCols.indexOf(i) > -1) v = (v === "") ? "" : (isNaN(parseFloat(v)) ? v : parseFloat(v));
+      row[i] = v;
+    }
+
+    sheet.appendRow(row);
+    const newRow = sheet.getLastRow();
+
+    // Isi otomatis kolom F (Rata-rata KM/L) dengan formula agar sinkron dgn Min/Max
+    if (sheetName === CONFIG.SHEET_ARMADA) {
+      sheet.getRange(newRow, 6).setFormula('=IF(AND(C' + newRow + '<>"",D' + newRow + '<>""),AVERAGE(C' + newRow + ',D' + newRow + '),"")');
+    }
+    return { status: 'success', message: 'Data berhasil ditambahkan.', rowId: newRow };
+  } catch (e) { return { status: 'error', message: e.toString() }; }
+}
+
+// ==========================================
+// API DASHBOARD (PURE MATH SINKRON PIVOT) - TIDAK DIUBAH
+// ==========================================
+function getDashboardData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetBBM = ss.getSheetByName(CONFIG.SHEET_BBM);
+    const lastRow = sheetBBM.getLastRow();
+    if (lastRow < 2) return { status: 'empty' };
+    
+    const rawData = sheetBBM.getRange(2, 1, lastRow - 1, 10).getValues();
+
+    // --- MENGAMBIL DATA STANDAR ARMADA ---
+    const sheetArmada = ss.getSheetByName(CONFIG.SHEET_ARMADA);
+    let armadaMap = {};
+    let totalStandar = 0;   
+    let jumlahArmada = 0;   
+
+    if (sheetArmada && sheetArmada.getLastRow() >= 2) {
+      const aData = sheetArmada.getRange(2, 1, sheetArmada.getLastRow() - 1, 4).getValues();
+      aData.forEach(r => {
+        if(r[0]) {
+          let minStd = parseFloat(r[2]) || 0;
+          armadaMap[r[0]] = { jenis: r[1] || '-', min: minStd, max: parseFloat(r[3])||0 };
+          
+          if(minStd > 0) {
+            totalStandar += minStd;
+            jumlahArmada++;
+          }
+        }
+      });
+    }
+    
+    let avgStandar = jumlahArmada > 0 ? (totalStandar / jumlahArmada) : 0;
+    
+    const now = new Date();
+    const currM = now.getMonth(); const currY = now.getFullYear();
+    const prevM = currM === 0 ? 11 : currM - 1; const prevY = currM === 0 ? currY - 1 : currY;
+
+    let stats = {
+      globalVol: 0, globalBiaya: 0, currVol: 0, currBiaya: 0, prevVol: 0, prevBiaya: 0,
+      globalDist_P2P: 0, currDist_P2P: 0, prevDist_P2P: 0,
+      globalJarak: 0, globalKML: 0, globalCostKM: 0 
+    };
+
+    let monthlyTrend = {}; 
+    let p2pCarMonthly = {}; 
+    let carsOdoData = {};
+    let carRawTotals = {}; 
+    
+    let bbmDist = {};     
+    let supirStats = {};  
+    
+    let sortedData = rawData
+      .filter(r => r[0] && r[1])
+      .map(r => ({
+        date: new Date(r[0]), plat: r[1], 
+        supir: r[2] || 'Tanpa Nama',              
+        vol: parseFloat(r[5]) || 0, biaya: parseFloat(r[6]) || 0, 
+        jenisBBM: r[8] || 'Lainnya',              
+        odo: parseFloat(r[9]) || 0
+      }))
+      .sort((a, b) => a.date - b.date);
+
+    // LOOP 1: Hitung RAW TOTALS
+    sortedData.forEach(row => {
+      const m = row.date.getMonth(); const y = row.date.getFullYear();
+      const mLabel = Utilities.formatDate(row.date, Session.getScriptTimeZone(), "MMM yyyy");
+      const monthKey = y + '-' + m;
+
+      stats.globalVol += row.vol; 
+      stats.globalBiaya += row.biaya;
+      
+      if (!bbmDist[row.jenisBBM]) bbmDist[row.jenisBBM] = { vol: 0, biaya: 0 };
+      bbmDist[row.jenisBBM].vol += row.vol;
+      bbmDist[row.jenisBBM].biaya += row.biaya;
+
+      // [PERBAIKAN 1]: Mengubah 'vol' jadi 'totalVol' & menambah 'totalJarak: 0' agar terbaca frontend
+      if (!supirStats[row.supir]) supirStats[row.supir] = { totalVol: 0, biaya: 0, trx: 0, totalJarak: 0 };
+      supirStats[row.supir].totalVol += row.vol;
+      supirStats[row.supir].biaya += row.biaya;
+      supirStats[row.supir].trx += 1; 
+      // -----------------------------------------------------------------------------------------
+
+      if (!carRawTotals[row.plat]) carRawTotals[row.plat] = { vol: 0, biaya: 0 };
+      carRawTotals[row.plat].vol += row.vol;
+      carRawTotals[row.plat].biaya += row.biaya;
+
+      if (m === currM && y === currY) { stats.currVol += row.vol; stats.currBiaya += row.biaya; }
+      if (m === prevM && y === prevY) { stats.prevVol += row.vol; stats.prevBiaya += row.biaya; }
+
+      if (!monthlyTrend[monthKey]) {
+        monthlyTrend[monthKey] = { label: mLabel, sortDate: row.date.getTime(), vol: 0, biaya: 0, cars: {} };
+      }
+      if (!monthlyTrend[monthKey].cars[row.plat]) monthlyTrend[monthKey].cars[row.plat] = { biaya: 0 };
+      
+      monthlyTrend[monthKey].vol += row.vol;
+      monthlyTrend[monthKey].biaya += row.biaya;
+      monthlyTrend[monthKey].cars[row.plat].biaya += row.biaya;
+
+      if (row.odo > 0) {
+        if (!carsOdoData[row.plat]) carsOdoData[row.plat] = [];
+        carsOdoData[row.plat].push({ 
+          odo: row.odo, vol: row.vol, biaya: row.biaya, 
+          date: row.date, mLabel: mLabel, m: m, y: y,
+          supir: row.supir
+        });
+      }
+    });
+
+    // LOOP 2: PURE MATH (AKHIR - AWAL) SESUAI PIVOT TABLE
+    let analysisTable = [];
+    let totalJarakGlobal = 0;
+    let globalStandarJarak = 0;
+
+    Object.keys(carsOdoData).forEach(plat => {
+      let records = carsOdoData[plat];
+      p2pCarMonthly[plat] = {};
+      
+      let totalVolCar = carRawTotals[plat] ? carRawTotals[plat].vol : 0;
+      let totalBiayaCar = carRawTotals[plat] ? carRawTotals[plat].biaya : 0;
+
+      if (records.length > 0) {
+        let kmAwal = records[0].odo;
+        let kmAkhir = records[records.length - 1].odo;
+        
+        let totalJarak = kmAkhir - kmAwal;
+        if (totalJarak < 0) totalJarak = 0; 
+
+        totalJarakGlobal += totalJarak;
+
+        for (let i = 1; i < records.length; i++) {
+          let dist = records[i].odo - records[i-1].odo;
+          if (dist < 0) dist = 0; // Tambahan aman: Cegah nilai minus jika salah input odometer
+          let curr = records[i];
+          
+          // [PERBAIKAN 2]: Menambahkan jarak yang ditempuh mobil ke akun Supir yang mengendarainya
+          if (supirStats[curr.supir]) {
+            supirStats[curr.supir].totalJarak += dist;
+          }
+          // ------------------------------------------------------------------------------------
+
+          if (!p2pCarMonthly[plat][curr.mLabel]) p2pCarMonthly[plat][curr.mLabel] = { dist: 0, vol: 0, biaya: 0 };
+          p2pCarMonthly[plat][curr.mLabel].dist += dist;
+          p2pCarMonthly[plat][curr.mLabel].vol += curr.vol;
+          p2pCarMonthly[plat][curr.mLabel].biaya += curr.biaya;
+
+          stats.globalDist_P2P += dist; 
+          if (curr.m === currM && curr.y === currY) stats.currDist_P2P += dist;
+          if (curr.m === prevM && curr.y === prevY) stats.prevDist_P2P += dist;
+        }
+
+        let dateAwal = records[0].date.getTime();
+        let dateAkhir = records[records.length - 1].date.getTime();
+        let selisihHari = Math.max(1, (dateAkhir - dateAwal) / (1000 * 3600 * 24));
+        let jarakPerHari = totalJarak / selisihHari;
+
+        let armada = armadaMap[plat] || { jenis: '-', min: 0, max: 0 };
+        let actKML = totalVolCar > 0 ? totalJarak / totalVolCar : 0;
+        let actCost = totalJarak > 0 ? totalBiayaCar / totalJarak : 0;
+        globalStandarJarak += (totalVolCar * armada.min);
+
+        analysisTable.push({
+          plat: plat, jenis: armada.jenis, stdMin: armada.min, stdMax: armada.max,
+          kmAwal: kmAwal, kmAkhir: kmAkhir, totalJarak: totalJarak, jarakPerHari: jarakPerHari,
+          totalVol: totalVolCar, totalBiaya: totalBiayaCar, actualKML: actKML, actualCostKM: actCost,
+          supir: records[records.length - 1].supir
+        });
+      }
+    });
+
+    const calcKML = (dist, vol) => vol > 0 ? dist / vol : 0;
+    const calcCost = (dist, biaya) => dist > 0 ? biaya / dist : 0;
+    const calcPct = (curr, prev) => prev === 0 ? (curr > 0 ? 100 : 0) : ((curr - prev) / prev) * 100;
+
+    const currKML = calcKML(stats.currDist_P2P, stats.currVol);
+    const prevKML = calcKML(stats.prevDist_P2P, stats.prevVol);
+    const currCostKM = calcCost(stats.currDist_P2P, stats.currBiaya);
+    const prevCostKM = calcCost(stats.prevDist_P2P, stats.prevBiaya);
+
+    const aktualGlobalKML = calcKML(totalJarakGlobal, stats.globalVol);
+    let selisihEfisiensi = aktualGlobalKML - avgStandar;
+    let persenEfisiensi = avgStandar > 0 ? (selisihEfisiensi / avgStandar) * 100 : 0;
+    let isIrit = aktualGlobalKML >= avgStandar;
+
+    let selisihJarak = totalJarakGlobal - globalStandarJarak;
+    let persenJarak = globalStandarJarak > 0 ? (selisihJarak / globalStandarJarak) * 100 : 0;
+    let isJarakLebih = totalJarakGlobal >= globalStandarJarak; 
+
+    let aktualGlobalCostKM = calcCost(totalJarakGlobal, stats.globalBiaya);
+    let standarCostKM = globalStandarJarak > 0 ? (stats.globalBiaya / globalStandarJarak) : 0;
+    let selisihCostKM = aktualGlobalCostKM - standarCostKM;
+    let persenCostKM = standarCostKM > 0 ? (selisihCostKM / standarCostKM) * 100 : 0;
+    let isCostLebihHemat = aktualGlobalCostKM <= standarCostKM; 
+
+    const finalStats = {
+      globalVol: stats.globalVol, 
+      currVol: stats.currVol, volPct: calcPct(stats.currVol, stats.prevVol),
+      globalBiaya: stats.globalBiaya, 
+      currBiaya: stats.currBiaya, biayaPct: calcPct(stats.currBiaya, stats.prevBiaya),
+      globalJarak: totalJarakGlobal, 
+      globalKML: aktualGlobalKML, 
+      currKML: currKML, kmlPct: calcPct(currKML, prevKML),
+      globalCostKM: calcCost(totalJarakGlobal, stats.globalBiaya), 
+      currCostKM: currCostKM, costkmPct: calcPct(currCostKM, prevCostKM),
+      
+      standarAvg: avgStandar.toFixed(2),
+      selisihKML: Math.abs(selisihEfisiensi).toFixed(2),
+      persenKML: Math.abs(persenEfisiensi).toFixed(1),
+      isIrit: isIrit,
+
+      standarJarak: globalStandarJarak,
+      selisihJarak: Math.abs(selisihJarak),
+      persenJarak: Math.abs(persenJarak).toFixed(1),
+      isJarakLebih: isJarakLebih,
+
+      standarCostKM: standarCostKM,
+      selisihCostKM: Math.abs(selisihCostKM),
+      persenCostKM: Math.abs(persenCostKM).toFixed(1),
+      isCostLebihHemat: isCostLebihHemat
+      };
+
+    let chartMonthly = { labels: [], vol: [], biaya: [] };
+    let pivotData = { months: [], cars: {} };
+    const sortedKeys = Object.keys(monthlyTrend).sort((a, b) => monthlyTrend[a].sortDate - monthlyTrend[b].sortDate);
+    
+    sortedKeys.forEach(k => {
+      const mLabel = monthlyTrend[k].label;
+      chartMonthly.labels.push(mLabel);
+      chartMonthly.vol.push(monthlyTrend[k].vol.toFixed(2));
+      chartMonthly.biaya.push(monthlyTrend[k].biaya);
+      pivotData.months.push(mLabel);
+
+      Object.keys(monthlyTrend[k].cars).forEach(plat => {
+        if (!pivotData.cars[plat]) pivotData.cars[plat] = {};
+        let p2p = (p2pCarMonthly[plat] && p2pCarMonthly[plat][mLabel]) ? p2pCarMonthly[plat][mLabel] : {dist:0, vol:0, biaya:0};
+        pivotData.cars[plat][mLabel] = {
+          biaya: monthlyTrend[k].cars[plat].biaya, 
+          kml: calcKML(p2p.dist, p2p.vol),         
+          costkm: calcCost(p2p.dist, p2p.biaya)    
+        };
+      });
+    });
+
+    return { status: 'success', data: { stats: finalStats, chartMonthly, pivotData, analysisTable, bbmDist: bbmDist, supirStats: supirStats } };
+  } catch (error) {
+    return { status: 'error', message: error.toString() };
+  }
+}
+
+// ==========================================
+// API HISTORY (MAPPING KOLOM A, B, C, F, G, J) - TIDAK DIUBAH
+// ==========================================
+function getHistoryData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(CONFIG.SHEET_BBM);
+    const lastRow = sheet.getLastRow();
+    const maxCol = sheet.getLastColumn(); 
+
+    if (lastRow < 2) return { status: 'success', data: [] };
+
+    const startRow = Math.max(2, lastRow - 1000);
+    const numRows = lastRow - startRow + 1;
+    const data = sheet.getRange(startRow, 1, numRows, maxCol).getValues();
+
+    let history = [];
+    const namaBulan = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+    data.forEach((row, index) => {
+      let isDeleted = maxCol >= 11 ? row[10] : ""; 
+      
+      // FILTER KETAT: Membuang baris kosong atau baris header/dummy (seperti "Nomor Plat" di Kolom B)
+      if (row[0] && row[1] && row[1] !== "Nomor Plat" && isDeleted !== "DELETED") {
+        try {
+          let date = new Date(row[0]); 
+          if (isNaN(date.getTime())) return; // Jika Kolom A bukan tanggal, lewati
+          
+          let tgl = date.getDate().toString().padStart(2, '0');
+          let bln = namaBulan[date.getMonth()];
+          let thn = date.getFullYear();
+          let jam = date.getHours().toString().padStart(2, '0');
+          let mnt = date.getMinutes().toString().padStart(2, '0');
+
+          history.push({
+            rowId: startRow + index,
+            rawDate: date.getTime(),
+            tanggal: `${tgl} ${bln} ${thn} ${jam}:${mnt}`, // KOLOM A (0)
+            bulan: `${bln} ${thn}`, 
+            plat: row[1], // KOLOM B (1)
+            supir: row[2], // KOLOM C (2)
+            volume: parseFloat(row[5]) || 0, // KOLOM F (5)
+            total: parseFloat(row[6]) || 0, // KOLOM G (6)
+            odo: parseFloat(row[9]) || 0 // KOLOM J (9)
+          });
+        } catch (e) { /* Abaikan baris rusak */ }
+      }
+    });
+
+    // Urutkan yang paling baru di atas
+    history.sort((a, b) => b.rawDate - a.rawDate);
+    return { status: 'success', data: history };
+  } catch (error) {
+    return { status: 'error', message: error.toString() };
+  }
+}
+
+// ==========================================
+// NEW v8: API DASHBOARD DELIVERY (sheet DELIVERY)
+// Mengirim array ringkas [tanggal, customer, nominal, status, supir]
+// agar filter interaktif bisa berjalan cepat di sisi aplikasi.
+// ==========================================
+function getDeliveryData() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("DELIVERY");
+    if (!sheet) return { status: 'error', message: 'Sheet "DELIVERY" tidak ditemukan.' };
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { status: 'success', rows: [] };
+    const lastCol = Math.min(sheet.getLastColumn(), 9);
+    const data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const rows = [];
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i];
+      const t = toDateStr_(r[0]);                       // TANGGAL
+      const c = r[2] ? String(r[2]).trim() : "";        // NAMA CUSTOMER
+      const n = parseFloat(String(r[3]).replace(/[^0-9.-]/g, "")) || 0; // NOMINAL
+      const s = r[4] ? String(r[4]).trim() : "";        // STATUS KIRIM
+      const d = r[5] ? String(r[5]).trim() : "";        // SUPIR
+      if (!t && !c && !s && !n) continue;               // lewati baris kosong
+      rows.push([t, c, n, s, d]);
+    }
+    return { status: 'success', rows: rows };
+  } catch (e) { return { status: 'error', message: e.toString() }; }
+}
+
+// (LAMA - TIDAK DIUBAH, tetap dipakai untuk tambah cepat BBM & SPBU)
+function addMasterData(kategori, nilaiInput) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet, rowData;
+    if (kategori === 'supir') {
+      sheet = ss.getSheetByName(CONFIG.SHEET_SUPIR);
+      rowData = ["SPR-" + Math.floor(1000 + Math.random() * 9000), nilaiInput];
+    } else if (kategori === 'armada') {
+      sheet = ss.getSheetByName(CONFIG.SHEET_ARMADA);
+      rowData = [nilaiInput, "-", "0", "0"]; // Isi format armada baru
+    } else if (kategori === 'spbu') {
+      sheet = ss.getSheetByName(CONFIG.SHEET_LOKASI);
+      rowData = ["LOC-" + Math.floor(1000 + Math.random() * 9000), nilaiInput];
+    }
+    sheet.appendRow(rowData);
+    return { status: 'success', message: `${nilaiInput} berhasil ditambahkan.` };
+  } catch (error) { return { status: 'error', message: error.toString() }; }
+}
+
+function getFolderStruk() {
+  const folders = DriveApp.getFoldersByName(CONFIG.FOLDER_NAME);
+  return folders.hasNext() ? folders.next() : DriveApp.createFolder(CONFIG.FOLDER_NAME);
+}
+
+function simpanData(payload) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_BBM);
+    const waktu = payload.tanggal ? new Date(payload.tanggal) : new Date();
+    const tanggalFormat = Utilities.formatDate(waktu, "GMT+7", "dd/MMM/yyyy");
+    let fileUrl = "";
+    if (payload.imageString) {
+      const folder = getFolderStruk();
+      const fileName = `${payload.plat}_${payload.supir}_${Utilities.formatDate(waktu, Session.getScriptTimeZone(), "dd-MM_HH-mm")}.jpg`;
+      const contentType = payload.imageString.split(':')[1].split(';')[0];
+      const bytes = Utilities.base64Decode(payload.imageString.split(',')[1]);
+      fileUrl = folder.createFile(Utilities.newBlob(bytes, contentType, fileName)).getUrl(); 
+    }
+    const cleanHarga = payload.harga.toString().replace(/[^0-9.-]+/g,"");
+    const totalHarga = parseFloat(cleanHarga) * parseFloat(payload.volume);
+    sheet.appendRow([tanggalFormat, payload.plat, payload.supir, payload.spbu, cleanHarga, payload.volume, totalHarga, payload.tipeBBM, payload.jenisBBM, payload.odometer, fileUrl]);
+    return { status: 'success', message: 'Transaksi berhasil disimpan!' };
+  } catch (error) { return { status: 'error', message: error.toString() }; }
+}

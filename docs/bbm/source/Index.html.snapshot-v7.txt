@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Aplikasi Pencatatan BBM</title>
+  
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+  /* Styling Header Tabel Light Neon - Modern Cyberpunk / Tech Dashboard */
+  .neon-header-main {
+    background: linear-gradient(135deg, #090d16 0%, #111c38) !important;
+    color: #00f0ff !important;
+    border-color: #003366 !important;
+    text-shadow: 0 0 10px rgba(0, 240, 255, 0.6);
+    font-weight: 600;
+  }
+  
+  .neon-header-odometer {
+    background: linear-gradient(135deg, #021a18 0%, #063833) !important;
+    color: #00ffcc !important;
+    border-color: #0b5345 !important;
+    text-shadow: 0 0 10px rgba(0, 255, 204, 0.6);
+    font-weight: 600;
+  }
+
+  .neon-header-odometer-sub {
+    background: linear-gradient(135deg, #021a18 0%, #063833) !important;
+    color: #99ffe6 !important;
+    border-color: #0b5345 !important;
+    font-size: 0.85rem;
+  }
+
+  .neon-header-actual {
+    background: linear-gradient(135deg, #130c26 0%, #291b4e) !important;
+    color: #d946ef !important;
+    border-color: #581c87 !important;
+    text-shadow: 0 0 10px rgba(217, 70, 239, 0.6);
+    font-weight: 600;
+  }
+
+  .neon-header-actual-sub {
+    background: linear-gradient(135deg, #130c26 0%, #291b4e) !important;
+    color: #f3e8ff !important;
+    border-color: #581c87 !important;
+    font-size: 0.85rem;
+  }
+
+    /* --- CSS DARK MODE --- */
+    [data-bs-theme="dark"] { --bg: #121212; }
+    [data-bs-theme="dark"] body { background-color: var(--bg); color: #e9ecef; }
+    [data-bs-theme="dark"] .card-custom, 
+    [data-bs-theme="dark"] .stat-card, 
+    [data-bs-theme="dark"] .bottom-nav,
+    [data-bs-theme="dark"] .accordion-item { 
+      background-color: #1e1e1e !important; 
+      border-color: #333 !important; 
+    }
+    [data-bs-theme="dark"] .text-dark { color: #f8f9fa !important; }
+    [data-bs-theme="dark"] .text-secondary, [data-bs-theme="dark"] .text-muted { color: #adb5bd !important; }
+    [data-bs-theme="dark"] .bg-light, [data-bs-theme="dark"] .table-light th { background-color: #2c2c2c !important; color: #f8f9fa !important; border-color: #444 !important; }
+    [data-bs-theme="dark"] .table, [data-bs-theme="dark"] td, [data-bs-theme="dark"] th { color: #e9ecef !important; border-color: #444 !important; background-color: #1e1e1e; }
+    [data-bs-theme="dark"] .form-control, [data-bs-theme="dark"] .form-select, [data-bs-theme="dark"] input { background-color: #2c2c2c !important; color: #fff !important; border-color: #444 !important; }
+    [data-bs-theme="dark"] .nav-item { color: #6c757d; }
+    [data-bs-theme="dark"] .accordion-button { background-color: #2c2c2c; color: #fff; }
+    [data-bs-theme="dark"] .swal2-popup { background-color: #1e1e1e !important; color: #fff !important; }
+    [data-bs-theme="dark"] .swal2-input { color: #fff !important; }
+
+    /* --- CSS UTAMA --- */
+    :root { --primary: #0d6efd; --bg: #f4f7f6; }
+    body { background-color: var(--bg); font-family: 'Segoe UI', system-ui, sans-serif; padding-bottom: 75px; }
+    .app-header { background: linear-gradient(135deg, var(--primary), #0a58ca); color: white; padding: 1.2rem; border-radius: 0 0 20px 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
+    .app-wrapper { max-width: 1200px; margin: 0 auto; padding: 0 1rem; }
+    
+    .view-section { display: none; animation: fadeIn 0.3s ease-in-out; }
+    .view-section.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    .card-custom { border: none; border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.04); background: white; padding: 1.5rem; margin-bottom: 1.2rem; }
+    .camera-box { border: 2px dashed #ced4da; border-radius: 12px; padding: 2rem 1rem; text-align: center; cursor: pointer; background: #f8f9fa; }
+    #previewContainer { position: relative; display: none; margin-top: 1rem; }
+    #previewImage { width: 100%; border-radius: 12px; }
+    .btn-remove-image { position: absolute; top: 10px; right: 10px; border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
+    
+    .stat-card { background: white; border-radius: 12px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.04); margin-bottom: 1rem; border-left: 5px solid var(--primary); }
+    .trend-up { color: #198754; font-weight: bold; }
+    .trend-down { color: #dc3545; font-weight: bold; }
+    .trend-flat { color: #6c757d; font-weight: bold; }
+    
+    .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: white; box-shadow: 0 -4px 15px rgba(0,0,0,0.05); display: flex; justify-content: space-around; padding: 0.8rem 0; z-index: 1000; max-width: 1200px; margin: 0 auto; border-radius: 20px 20px 0 0; }
+    .nav-item { text-align: center; color: #adb5bd; cursor: pointer; flex: 1; font-size: 0.75rem; transition: 0.3s; font-weight: 500; }
+    .nav-item i { font-size: 1.4rem; display: block; margin-bottom: 2px; }
+    .nav-item.active { color: var(--primary); font-weight: bold; }
+    .nav-item.active i { transform: scale(1.15); }
+    .loader-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.98); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    
+    .table-container { max-height: 400px; overflow-y: auto; overflow-x: auto; }
+    .table-custom th { background-color: #f8f9fa; font-size: 0.75rem; text-align: center; vertical-align: middle; white-space: nowrap; }
+    .table-custom td { font-size: 0.75rem; text-align: right; vertical-align: middle; white-space: nowrap;}
+    .table-custom td:first-child { text-align: left; font-weight: bold; }
+    
+    .analysis-table th { background-color: #0a58ca; color: white; border-color: #0d6efd; }
+    .analysis-table td { text-align: center; }
+
+    @media print {
+      .bottom-nav, .btn, #globalLoader { display: none !important; }
+      body { background: white !important; padding-bottom: 0 !important; }
+      .app-header { background: #0a58ca !important; color: black !important; padding: 1rem; border-radius: 0; }
+      .card-custom, .stat-card { box-shadow: none !important; border: 1px solid #dee2e6 !important; break-inside: avoid; }
+      canvas { max-width: 100% !important; height: auto !important; }
+      .table-container { max-height: none !important; overflow: visible !important; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="globalLoader" class="loader-overlay">
+  <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
+  <h5 class="mt-3 text-secondary fw-bold">Memuat Sistem...</h5>
+</div>
+
+<div class="app-header d-flex justify-content-between align-items-center">
+  <h4 class="mb-0 fw-bold"><i class="bi bi-truck-front-fill me-2"></i>Aplikasi BBM</h4>
+  <button class="btn btn-sm btn-outline-light border-0" onclick="App.toggleTheme()" title="Ubah Mode Layar">
+    <i class="bi bi-moon-stars-fill fs-5" id="theme-icon"></i>
+  </button>
+</div>
+
+<div class="app-wrapper">
+
+  <!-- ================= MENU 1: DASHBOARD ================= -->
+  <div id="view-dashboard" class="view-section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="fw-bold mb-0">Analisis Pemakaian BBM & Efisiensi</h5>
+      <div>
+        <button class="btn btn-sm btn-outline-danger me-1" onclick="window.print()" title="Cetak PDF/Print"><i class="bi bi-file-pdf-fill"></i> Cetak</button>
+        <button class="btn btn-sm btn-outline-primary" onclick="App.loadDashboard()"><i class="bi bi-arrow-clockwise"></i></button>
+      </div>
+    </div>
+    
+    <!-- KUMPULAN STAT CARD (RESPONSIF GRID) -->
+    <div class="row g-3 mb-4">
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="stat-card h-100" style="border-left-color: #198754; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: #fff;">
+          <small class="text-secondary d-block fw-bold mb-1">KONSUMSI BBM (ALL-TIME)</small>
+          <h4 class="fw-bold text-success mb-2" id="dash-vol">0</h4>
+          <div id="trend-vol" class="border-top pt-2 mt-2"></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="stat-card h-100" style="border-left-color: #dc3545; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: #fff;">
+          <small class="text-secondary d-block fw-bold mb-1">BIAYA BBM (ALL-TIME)</small>
+          <h4 class="fw-bold text-danger mb-2" id="dash-biaya">0</h4>
+          <div id="trend-biaya" class="border-top pt-2 mt-2"></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="stat-card h-100" style="border-left-color: #ffc107; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: #fff;">
+          <small class="text-secondary d-block fw-bold mb-1">TOTAL JARAK TEMPUH (KM)</small>
+          <h4 class="fw-bold text-warning mb-2" id="dash-jarak">0</h4>
+          <div id="trend-jarak" class="border-top pt-2 mt-2 text-muted" style="font-size: 0.85rem;"></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-6 col-lg-6">
+        <div class="stat-card h-100" style="border-left-color: #0d6efd; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: #fff;">
+          <small class="text-secondary d-block fw-bold mb-1">EFISIENSI BBM (KM/L)</small>
+          <h4 class="fw-bold text-primary mb-2" id="dash-kml">0</h4>
+          <div id="trend-kml" class="border-top pt-2 mt-2"></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-12 col-lg-6">
+        <div class="stat-card h-100" style="border-left-color: #6f42c1; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: #fff;">
+          <small class="text-secondary d-block fw-bold mb-1">BIAYA BBM PER KM (Rp/KM)</small>
+          <h4 class="fw-bold mb-2" id="dash-costkm" style="color: #6f42c1;">0</h4>
+          <div id="trend-costkm" class="border-top pt-2 mt-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEADERBOARD TOP 5 -->
+    <div class="row g-3 mb-4 mt-2">
+      <div class="col-12 col-md-6">
+        <div class="card-custom bg-soft-success p-3 border border-success h-100">
+          <h6 class="fw-bold text-success mb-3" style="font-size:0.85rem;"><i class="bi bi-trophy-fill me-1"></i> Top 5 Paling Irit</h6>
+          <div id="top-irit" class="table-responsive" style="font-size:0.75rem;"></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-6">
+        <div class="card-custom bg-soft-danger p-3 border border-danger h-100">
+          <h6 class="fw-bold text-danger mb-3" style="font-size:0.85rem;"><i class="bi bi-exclamation-triangle-fill me-1"></i> Top 5 Paling Boros</h6>
+          <div id="top-boros" class="table-responsive" style="font-size:0.75rem;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABEL 1: ANALISA AKTUAL VS STANDAR -->
+    <div class="card-custom mb-3 p-3 border border-primary">
+      <h6 class="fw-bold text-primary mb-3"><i class="bi bi-clipboard-data me-2"></i>Analisa Kinerja Aktual vs Standar</h6>
+      <div class="table-container">
+        <table class="table table-bordered table-custom table-sm analysis-table align-middle">
+          <thead>
+            <tr class="text-center">
+              <th rowspan="2" class="neon-header-main align-middle">Plat Mobil</th>
+              <th rowspan="2" class="neon-header-main align-middle">Jenis</th>
+              <th rowspan="2" class="neon-header-main align-middle">Standar (KM/L)</th>
+              <th rowspan="2" class="neon-header-main align-middle">Status</th>
+              <th colspan="4" class="neon-header-odometer">Rekam Jarak (Odometer)</th>
+              <th colspan="4" class="neon-header-actual">Kinerja Aktual</th>
+            </tr>
+            <tr class="text-center">
+              <th class="neon-header-odometer-sub">KM Awal</th>
+              <th class="neon-header-odometer-sub">KM Akhir</th>
+              <th class="neon-header-odometer-sub">Jarak (KM)</th>
+              <th class="neon-header-odometer-sub">Jarak/Hari</th>
+              <th class="neon-header-actual-sub">Vol (L)</th>
+              <th class="neon-header-actual-sub">Total (Rp)</th>
+              <th class="neon-header-actual-sub">Aktual KM/L</th>
+              <th class="neon-header-actual-sub">Aktual Cost/KM</th>
+            </tr>
+          </thead>
+          <tbody id="analysis-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- DISTRIBUSI BBM & REKAP SUPIR -->
+    <div class="row g-3 mb-3">
+      <div class="col-md-5 col-12">
+        <div class="card-custom h-100 p-3">
+          <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-pie-chart-fill me-2"></i>Distribusi Jenis BBM</h6>
+          <div style="height: 250px;">
+            <canvas id="chartBbmDist"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-7 col-12">
+        <div class="card-custom h-100 p-3">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold text-info mb-0" style="font-size:0.85rem;"><i class="bi bi-trophy-fill me-2 text-warning"></i> Performa Supir</h6>
+            <span class="badge bg-info text-dark" style="font-size: 0.75rem;">KM/L & Cost</span>
+          </div>
+          <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+            <table class="table table-sm table-bordered table-custom align-middle mb-0">
+              <thead class="table-dark">
+                <tr class="text-center">
+                  <th style="width: 15%; background-color: #212529; color: #fff;">Peringkat</th>
+                  <th class="text-start" style="width: 30%; background-color: #212529; color: #fff;">Nama Supir</th>
+                  <th style="width: 18%; background-color: #212529; color: #fff;">Jarak (KM)</th>
+                  <th style="width: 15%; background-color: #212529; color: #fff;">KM/L</th>
+                  <th style="width: 22%; background-color: #212529; color: #fff;">Cost/KM</th>
+                  <th style="width: 20%; background-color: #212529; color: #fff;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="supir-body">
+                <!-- Data di-generate otomatis oleh script -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- KUMPULAN GRAFIK (RESPONSIF GRID) -->
+    <div class="row g-3 mb-3">
+      <div class="col-12">
+        <div class="card-custom h-100 p-3">
+          <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-bar-chart-fill me-2"></i>Tren Konsumsi & Biaya BBM</h6>
+          <canvas id="chartMonthly" height="200"></canvas>
+        </div>
+      </div>
+      <div class="col-12 col-lg-6">
+        <div class="card-custom h-100 p-3">
+          <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-speedometer me-2"></i>Efisiensi (KM/L) Tiap Mobil</h6>
+          <canvas id="chartEfficiency" height="250"></canvas>
+        </div>
+      </div>
+      <div class="col-12 col-lg-6">
+        <div class="card-custom h-100 p-3">
+          <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-cash-coin me-2"></i>Cost/KM (Rp) Tiap Mobil</h6>
+          <canvas id="chartCostKm" height="250"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MENU 2: FORM PENGISIAN ================= -->
+  <div id="view-form" class="view-section active">
+    <div class="card-custom">
+      <form id="formBBM" novalidate>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Tanggal & Waktu Pengisian</label>
+          <input type="datetime-local" class="form-control bg-light" id="tanggal" required>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label small fw-bold">Nomor Plat</label>
+            <select class="form-select" id="plat" required></select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-bold">Nama Supir</label>
+            <select class="form-select" id="supir" required></select>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-bold">Lokasi SPBU</label>
+          <select class="form-select" id="spbu" required></select>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label small fw-bold">Tipe BBM</label>
+            <select class="form-select" id="tipeBBM" required onchange="App.onTipeChange()">
+              <option value="" disabled selected>Pilih...</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-bold">Jenis BBM</label>
+            <select class="form-select" id="jenisBBM" required disabled onchange="App.onJenisChange()"></select>
+          </div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label small fw-bold">Harga/L (Rp)</label>
+            <input type="number" class="form-control bg-light" id="harga" placeholder="Auto" readonly required>
+          </div>
+          <div class="col-6">
+            <label class="form-label small fw-bold">Volume (L)</label>
+            <input type="number" step="0.01" class="form-control" id="volume" placeholder="0" required>
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="form-label small fw-bold">Odometer Akhir (KM)</label>
+          <input type="number" class="form-control" id="odometer" placeholder="Cth: 45000" required>
+        </div>
+        <div class="mb-4">
+          <label class="form-label small fw-bold">Foto Bukti (Struk)</label>
+          <div class="camera-box" id="cameraBtn" onclick="document.getElementById('fotoStruk').click()">
+            <i class="bi bi-camera-fill text-primary" style="font-size: 2rem;"></i>
+            <p class="mb-0 mt-2 text-secondary">Ketuk untuk Kamera</p>
+          </div>
+          <input type="file" id="fotoStruk" accept="image/*" capture="environment" class="d-none" onchange="App.onImageSelected(event)">
+          <div id="previewContainer">
+            <img id="previewImage" src="" alt="Preview">
+            <button type="button" class="btn btn-danger btn-remove-image" onclick="App.removeImage()"><i class="bi bi-x-lg"></i></button>
+            <input type="hidden" id="imageString" required>
+          </div>
+        </div>
+        <button type="button" class="btn btn-primary w-100 py-3 fw-bold rounded-3 shadow-sm" id="btnSubmit" onclick="App.submitData()">
+          <i class="bi bi-cloud-arrow-up-fill me-2"></i>Kirim Data Transaksi
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MENU 3: HISTORY ================= -->
+  <div id="view-history" class="view-section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="fw-bold mb-0">Riwayat Pengisian</h5>
+      <button class="btn btn-sm btn-outline-primary" onclick="App.loadHistory()"><i class="bi bi-arrow-clockwise"></i></button>
+    </div>
+    
+    <div class="mb-3">
+      <select class="form-select form-select-sm shadow-sm" id="filterBulan" onchange="App.applyHistoryFilter()">
+        <option value="ALL">Semua Bulan</option>
+      </select>
+    </div>
+
+    <!-- TABEL HISTORY -->
+    <div class="card-custom p-0 overflow-hidden">
+      <div class="table-container">
+        <table class="table table-striped table-hover table-custom mb-0">
+          <thead style="border-bottom: 2px solid #0d6efd;">
+            <tr>
+              <th style="background-color: #0a58ca; color: white; border: 1px solid #0d6efd;">Tanggal</th>
+              <th style="background-color: #0a58ca; color: white; border: 1px solid #0d6efd;">Nomor Plat</th>
+              <th style="background-color: #0a58ca; color: white; border: 1px solid #0d6efd;">Nama Supir</th>
+              <th style="background-color: #0a58ca; color: white; border: 1px solid #0d6efd;">Volume Isi</th>
+              <th style="background-color: #0a58ca; color: white; border: 1px solid #0d6efd;">Total Harga</th>
+              <th style="background-color: #0a58ca; color: white; border: 1px solid #0d6efd;">Odometer</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            <tr><td colspan="7" class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Memuat...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MENU 4: SETTINGS (CMS) ================= -->
+  <div id="view-settings" class="view-section">
+    <h5 class="fw-bold mb-3">Manajemen Master Data</h5>
+    <div class="accordion" id="accordionSettings">
+      <div class="accordion-item card-custom p-0 mb-3" style="border-radius: 12px; overflow: hidden;">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseBbm">
+            <i class="bi bi-droplet-fill me-2 text-primary"></i> Data Master BBM
+          </button>
+        </h2>
+        <div id="collapseBbm" class="accordion-collapse collapse" data-bs-parent="#accordionSettings">
+          <div class="accordion-body p-0 py-2">
+            <div class="input-group mb-3 px-3 mt-2">
+              <input type="text" class="form-control border-primary" id="inputNewBbm" placeholder="Jenis Bahan Bakar Baru">
+              <button class="btn btn-primary" onclick="App.addMasterData('bbm', 'inputNewBbm')"><i class="bi bi-plus-lg"></i></button>
+            </div>
+            <div id="listBbm" class="small text-secondary"></div>
+          </div>
+        </div>
+      </div>  
+      <div class="accordion-item card-custom p-0 mb-3" style="border-radius: 12px; overflow: hidden;">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSupir">
+            <i class="bi bi-person-badge-fill me-2 text-primary"></i> Data Supir
+          </button>
+        </h2>
+        <div id="collapseSupir" class="accordion-collapse collapse" data-bs-parent="#accordionSettings">
+          <div class="accordion-body">
+            <div class="input-group mb-3">
+              <input type="text" class="form-control" id="inputNewSupir" placeholder="Nama Supir">
+              <button class="btn btn-primary" onclick="App.addMasterData('supir', 'inputNewSupir')"><i class="bi bi-plus-lg"></i></button>
+            </div>
+            <div id="listSupir" class="small text-secondary"></div>
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item card-custom p-0 mb-3" style="border-radius: 12px; overflow: hidden;">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseKendaraan">
+            <i class="bi bi-car-front-fill me-2 text-primary"></i> Data Kendaraan
+          </button>
+        </h2>
+        <div id="collapseKendaraan" class="accordion-collapse collapse" data-bs-parent="#accordionSettings">
+          <div class="accordion-body">
+            <div class="input-group mb-3">
+              <input type="text" class="form-control" id="inputNewPlat" placeholder="Nomor Plat">
+              <button class="btn btn-primary" onclick="App.addMasterData('armada', 'inputNewPlat')"><i class="bi bi-plus-lg"></i></button>
+            </div>
+            <div id="listKendaraan" class="small text-secondary"></div>
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item card-custom p-0 mb-3" style="border-radius: 12px; overflow: hidden;">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSpbu">
+            <i class="bi bi-geo-alt-fill me-2 text-primary"></i> Lokasi SPBU
+          </button>
+        </h2>
+        <div id="collapseSpbu" class="accordion-collapse collapse" data-bs-parent="#accordionSettings">
+          <div class="accordion-body">
+            <div class="input-group mb-3">
+              <input type="text" class="form-control" id="inputNewSpbu" placeholder="Nama SPBU">
+              <button class="btn btn-primary" onclick="App.addMasterData('spbu', 'inputNewSpbu')"><i class="bi bi-plus-lg"></i></button>
+            </div>
+            <div id="listSpbu" class="small text-secondary"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ================= BOTTOM NAVIGATION ================= -->
+<div class="bottom-nav">
+  <div class="nav-item" onclick="App.switchView('dashboard', this)">
+    <i class="bi bi-pie-chart-fill"></i><span>Dashboard</span>
+  </div>
+  <div class="nav-item active" onclick="App.switchView('form', this)">
+    <i class="bi bi-plus-circle-fill"></i><span>Input BBM</span>
+  </div>
+  <div class="nav-item" onclick="App.switchView('history', this)">
+    <i class="bi bi-clock-history"></i><span>History</span>
+  </div>
+  <div class="nav-item" onclick="App.switchView('settings', this)">
+    <i class="bi bi-sliders"></i><span>Settings</span>
+  </div>
+</div>
+
+<script>
+  const bsScript = document.createElement('script');
+  bsScript.src = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js";
+  document.head.appendChild(bsScript);
+
+  const App = {
+    masterBBM: [], allHistoryData: [], charts: {}, cacheData: {},
+    
+    // --- FITUR TEMA GELAP/TERANG ---
+    initTheme: function() {
+      const savedTheme = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-bs-theme', savedTheme);
+      const icon = document.getElementById('theme-icon');
+      if(savedTheme === 'dark' && icon) icon.classList.replace('bi-moon-stars-fill', 'bi-sun-fill');
+      this.updateChartColors(savedTheme);
+    },
+
+    toggleTheme: function() {
+      const html = document.documentElement;
+      const currentTheme = html.getAttribute('data-bs-theme');
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      
+      html.setAttribute('data-bs-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      
+      const icon = document.getElementById('theme-icon');
+      if(newTheme === 'dark') icon.classList.replace('bi-moon-stars-fill', 'bi-sun-fill');
+      else icon.classList.replace('bi-sun-fill', 'bi-moon-stars-fill');
+      
+      this.updateChartColors(newTheme);
+    },
+
+    updateChartColors: function(theme) {
+      Chart.defaults.color = theme === 'dark' ? '#adb5bd' : '#666';
+      Chart.defaults.borderColor = theme === 'dark' ? '#333' : '#e5e5e5';
+      Object.values(this.charts).forEach(chart => chart.update());
+    },
+
+    init: function() {
+      this.initTheme(); // Panggil fungsi tema saat aplikasi dimuat
+      
+      let now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      document.getElementById('tanggal').value = now.toISOString().slice(0, 16);
+
+      google.script.run
+        .withSuccessHandler(this.onDataLoaded.bind(this))
+        .withFailureHandler(this.onSystemError.bind(this))
+        .getDropdownData();
+    },
+
+    switchView: function(viewId, navElement) {
+      if (viewId === 'settings') {
+        Swal.fire({
+          title: '<i class="bi bi-shield-lock-fill text-danger" style="font-size:2rem;"></i><br>Akses Admin',
+          text: 'Masukkan PIN rahasia untuk membuka menu ini.',
+          input: 'password',
+          inputPlaceholder: 'Masukkan PIN...',
+          inputAttributes: { autocapitalize: 'off', autocorrect: 'off' },
+          showCancelButton: true,
+          confirmButtonColor: '#0d6efd',
+          confirmButtonText: 'Buka Kunci',
+          cancelButtonText: 'Batal'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            if (result.value === '609215') {
+              this.executeSwitch(viewId, navElement);
+            } else {
+              Swal.fire({ icon: 'error', title: 'Akses Ditolak', text: 'PIN yang Anda masukkan salah!' });
+            }
+          }
+        });
+      } else {
+        this.executeSwitch(viewId, navElement);
+      }
+    },
+
+    executeSwitch: function(viewId, navElement) {
+      document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+      document.getElementById('view-' + viewId).classList.add('active');
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      navElement.classList.add('active');
+
+      if(viewId === 'history' || viewId === 'settings') this.loadHistory();
+      if(viewId === 'dashboard') this.loadDashboard();
+    },
+
+    onDataLoaded: function(response) {
+      if (response.status === 'error') return this.onSystemError(response.message);
+      const data = response.data;
+      this.cacheData = data;
+      
+      this.populate('plat', data.plat, 'Pilih Plat');
+      this.populate('supir', data.supir, 'Pilih Supir');
+      this.populate('spbu', data.spbu, 'Pilih Lokasi');
+      
+      this.masterBBM = data.bbm; 
+      const tipeUnik = [...new Set(data.bbm.map(item => item[1]).filter(String))];
+      this.populate('tipeBBM', tipeUnik, 'Pilih Tipe BBM');
+      
+      this.renderSettingsLists(); 
+      document.getElementById('globalLoader').style.display = 'none';
+    },
+
+    populate: function(id, arrayData, placeholder) {
+      const el = document.getElementById(id);
+      el.innerHTML = `<option value="" disabled selected>${placeholder}</option>`;
+      arrayData.forEach(item => el.innerHTML += `<option value="${item}">${item}</option>`);
+    },
+
+    renderSettingsLists: function() {
+      const buildTable = (headers, dataRows, sheetName, type) => {
+        let ths = headers.map(h => `<th>${h}</th>`).join('');
+        let html = `<div class="table-responsive"><table class="table table-sm table-bordered text-center align-middle mb-0" style="font-size:0.75rem; white-space:nowrap;">
+          <thead class="table-light"><tr>${ths}<th>Aksi</th></tr></thead><tbody>`;
+
+        if(!dataRows || dataRows.length === 0) {
+           html += `<tr><td colspan="${headers.length + 1}" class="text-secondary py-3">Belum ada data / Kosong</td></tr>`;
+        } else {
+           dataRows.forEach(item => {
+             let tds = headers.map((_, i) => {
+               if(type === 'BBM' && i === 2) return `<td class="text-danger fw-bold">Rp ${Number(item.data[i]||0).toLocaleString('id-ID')}</td>`;
+               return `<td>${item.data[i] || '-'}</td>`;
+             }).join('');
+             
+             html += `<tr>${tds}
+               <td>
+                 <button class="btn btn-sm btn-outline-primary py-0 px-1 me-1" onclick="App.editMaster('${sheetName}', ${item.rowId}, '${type}')"><i class="bi bi-pencil"></i></button>
+                 <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="App.deleteMaster('${sheetName}', ${item.rowId})"><i class="bi bi-trash"></i></button>
+               </td></tr>`;
+           });
+        }
+        return html + `</tbody></table></div>`;
+      };
+
+      document.getElementById('listSupir').innerHTML = buildTable(['ID Supir', 'Nama Supir', 'No Telp', 'Status'], this.cacheData.supirFull, 'DATA SUPIR', 'SUPIR');
+      document.getElementById('listKendaraan').innerHTML = buildTable(['Nomor Plat', 'Jenis Kendaraan', 'Standar Min', 'Standar Max', 'Status'], this.cacheData.platFull, 'DATA ARMADA', 'ARMADA');
+      document.getElementById('listSpbu').innerHTML = buildTable(['Kode SPBU', 'Nama SPBU', 'Alamat', 'Catatan Khusus'], this.cacheData.spbuFull, 'LOKASI PENGISIAN', 'SPBU');
+      document.getElementById('listBbm').innerHTML = buildTable(['Jenis Bahan Bakar', 'Tipe BBM', 'Harga per Liter'], this.cacheData.bbmFull, 'MASTER BBM', 'BBM');
+    },
+
+    editMaster: function(sheetName, rowId, type) {
+      let item, htmlForm = '';
+      
+      if(type === 'SUPIR') {
+        item = this.cacheData.supirFull.find(x => x.rowId === rowId).data;
+        htmlForm = `
+          <label class="small fw-bold text-start w-100">ID Supir</label><input id="swal-input1" class="form-control mb-2" value="${item[0] || ''}">
+          <label class="small fw-bold text-start w-100">Nama Supir</label><input id="swal-input2" class="form-control mb-2" value="${item[1] || ''}">
+          <label class="small fw-bold text-start w-100">No Telp</label><input id="swal-input3" class="form-control mb-2" value="${item[2] || ''}">
+          <label class="small fw-bold text-start w-100">Status</label><input id="swal-input4" class="form-control mb-2" value="${item[3] || ''}">`;
+      } else if(type === 'ARMADA') {
+         item = this.cacheData.platFull.find(x => x.rowId === rowId).data;
+         htmlForm = `
+           <label class="small fw-bold text-start w-100">Nomor Plat</label><input id="swal-input1" class="form-control mb-2" value="${item[0] || ''}">
+           <label class="small fw-bold text-start w-100">Jenis Kendaraan</label><input id="swal-input2" class="form-control mb-2" value="${item[1] || ''}">
+           <div class="row mb-2"><div class="col-6"><label class="small fw-bold">Min KM/L</label><input id="swal-input3" class="form-control" type="number" step="0.1" value="${item[2] || ''}"></div>
+           <div class="col-6"><label class="small fw-bold">Max KM/L</label><input id="swal-input4" class="form-control" type="number" step="0.1" value="${item[3] || ''}"></div></div>
+           <label class="small fw-bold text-start w-100">Status</label><input id="swal-input5" class="form-control mb-2" value="${item[4] || ''}">`;
+      } else if(type === 'SPBU') {
+         item = this.cacheData.spbuFull.find(x => x.rowId === rowId).data;
+         htmlForm = `
+           <label class="small fw-bold text-start w-100">Kode SPBU</label><input id="swal-input1" class="form-control mb-2" value="${item[0] || ''}">
+           <label class="small fw-bold text-start w-100">Nama SPBU</label><input id="swal-input2" class="form-control mb-2" value="${item[1] || ''}">
+           <label class="small fw-bold text-start w-100">Alamat</label><input id="swal-input3" class="form-control mb-2" value="${item[2] || ''}">
+           <label class="small fw-bold text-start w-100">Catatan Khusus</label><input id="swal-input4" class="form-control mb-2" value="${item[3] || ''}">`;
+      } else if(type === 'BBM') {
+         item = this.cacheData.bbmFull.find(x => x.rowId === rowId).data;
+         htmlForm = `
+           <label class="small fw-bold text-start w-100">Jenis Bahan Bakar</label><input id="swal-input1" class="form-control mb-2" value="${item[0] || ''}">
+           <label class="small fw-bold text-start w-100">Tipe BBM</label><input id="swal-input2" class="form-control mb-2" value="${item[1] || ''}">
+           <label class="small fw-bold text-start w-100">Harga Per Liter (Rp)</label><input id="swal-input3" class="form-control" type="number" value="${item[2] || 0}">`;
+      }
+
+      Swal.fire({
+        title: '<i class="bi bi-pencil-square text-primary"></i> Edit Data',
+        html: htmlForm, focusConfirm: false, showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal',
+        preConfirm: () => {
+          let vals = [];
+          if(document.getElementById('swal-input1')) vals.push(document.getElementById('swal-input1').value);
+          if(document.getElementById('swal-input2')) vals.push(document.getElementById('swal-input2').value);
+          if(document.getElementById('swal-input3')) vals.push(document.getElementById('swal-input3').value);
+          if(document.getElementById('swal-input4')) vals.push(document.getElementById('swal-input4').value);
+          if(document.getElementById('swal-input5')) vals.push(document.getElementById('swal-input5').value);
+          return vals;
+        }
+      }).then((result) => {
+        if(result.isConfirmed) {
+           Swal.fire({title: 'Menyimpan...', didOpen: () => Swal.showLoading()});
+           google.script.run.withSuccessHandler(res => {
+             if(res.status === 'success') { Swal.fire('Berhasil', 'Data diubah!', 'success'); this.init(); }
+             else Swal.fire('Gagal', res.message, 'error');
+           }).editMasterData(sheetName, rowId, result.value);
+        }
+      });
+    },
+
+    deleteMaster: function(sheetName, rowId) {
+       Swal.fire({
+         title: 'Hapus Master Data?',
+         text: 'Data ini akan disembunyikan (Soft Delete) agar tidak bisa dipilih lagi di form input.',
+         icon: 'warning', showCancelButton: true, confirmButtonColor: '#dc3545', confirmButtonText: 'Ya, Hapus!'
+       }).then((result) => {
+          if(result.isConfirmed) {
+             Swal.fire({title: 'Menghapus...', didOpen: () => Swal.showLoading()});
+             google.script.run.withSuccessHandler(res => {
+               if(res.status === 'success') { Swal.fire('Terhapus', 'Data dihilangkan!', 'success'); this.init(); }
+               else Swal.fire('Gagal', res.message, 'error');
+             }).deleteMasterDataAction(sheetName, rowId);
+          }
+       });
+    },
+
+    addMasterData: function(kategori, inputId) {
+      const inputEl = document.getElementById(inputId);
+      const nilai = inputEl.value.trim();
+      if(!nilai) return Swal.fire('Perhatian', 'Input kosong!', 'warning');
+      
+      Swal.fire({ title: 'Menyimpan...', didOpen: () => Swal.showLoading() });
+      google.script.run.withSuccessHandler(res => {
+        if(res.status === 'success') {
+          Swal.fire('Berhasil!', res.message, 'success');
+          inputEl.value = '';
+          this.init(); 
+        }
+      }).addMasterData(kategori, nilai);
+    },
+
+    onTipeChange: function() {
+      const tipe = document.getElementById('tipeBBM').value;
+      const jenisEl = document.getElementById('jenisBBM');
+      jenisEl.disabled = false;
+      jenisEl.innerHTML = '<option value="" disabled selected>Pilih Jenis BBM</option>';
+      this.masterBBM.filter(item => item[1] === tipe).forEach(item => {
+        jenisEl.innerHTML += `<option value="${item[0]}">${item[0]}</option>`;
+      });
+      document.getElementById('harga').value = ''; 
+    },
+
+    onJenisChange: function() {
+      const jenis = document.getElementById('jenisBBM').value;
+      const bbmData = this.masterBBM.find(item => item[0] === jenis);
+      if(bbmData && bbmData[2]) document.getElementById('harga').value = bbmData[2];
+      else document.getElementById('harga').value = 0;
+    },
+
+    loadHistory: function() {
+      const tbody = document.getElementById('history-table-body');
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Memuat...</td></tr>`;
+      
+      google.script.run
+        .withSuccessHandler(res => {
+          if(res.status === 'error') {
+            return tbody.innerHTML = `<tr><td colspan="7" class="text-danger text-center"><i class="bi bi-exclamation-triangle-fill me-2"></i>Error: ${res.message}</td></tr>`;
+          }
+          this.allHistoryData = res.data;
+          
+          const bulans = [...new Set(res.data.map(d => d.bulan))];
+          let bulanHtml = '<option value="ALL">Semua Bulan</option>';
+          bulans.forEach(b => bulanHtml += `<option value="${b}">${b}</option>`);
+          document.getElementById('filterBulan').innerHTML = bulanHtml;
+          
+          this.applyHistoryFilter();
+        })
+        .withFailureHandler(err => {
+          tbody.innerHTML = `<tr><td colspan="7" class="text-danger text-center"><i class="bi bi-x-circle-fill me-2"></i>Gagal Memuat: ${err.message}</td></tr>`;
+        })
+        .getHistoryData();
+    },
+
+    applyHistoryFilter: function() {
+      const bulanVal = document.getElementById('filterBulan').value;
+      const tbody = document.getElementById('history-table-body');
+      
+      let filtered = this.allHistoryData;
+      if (bulanVal !== 'ALL') filtered = filtered.filter(d => d.bulan === bulanVal);
+
+      if(filtered.length === 0) return tbody.innerHTML = `<tr><td colspan="6" class="text-center text-secondary py-3">Tidak ada data.</td></tr>`;
+      
+      tbody.innerHTML = filtered.map(trx => `
+        <tr>
+          <td>${trx.tanggal}</td>
+          <td class="fw-bold text-dark">${trx.plat}</td>
+          <td>${trx.supir}</td>
+          <td><span class="badge bg-secondary">${trx.volume} L</span></td>
+          <td class="fw-bold text-danger">Rp ${trx.total.toLocaleString('id-ID')}</td>
+          <td>${trx.odo.toLocaleString('id-ID')}</td>
+        </tr>`).join('');
+    },
+
+    loadDashboard: function() {
+      Swal.fire({ title: 'Mensinkronisasi Data...', didOpen: () => Swal.showLoading() });
+      google.script.run.withSuccessHandler(res => {
+        Swal.close();
+        if(res.status === 'empty') return Swal.fire('Info', 'Belum ada data.', 'info');
+        
+        const d = res.data;
+        const fmtRp = val => 'Rp ' + Math.round(val || 0).toLocaleString('id-ID');
+        
+        document.getElementById('dash-vol').innerText = (d.stats.globalVol || 0).toLocaleString('id-ID', {minimumFractionDigits: 1, maximumFractionDigits: 2});
+        document.getElementById('dash-biaya').innerText = fmtRp(d.stats.globalBiaya);
+        document.getElementById('dash-jarak').innerText = d.stats.globalJarak ? d.stats.globalJarak.toLocaleString('id-ID') : '0'; 
+        document.getElementById('dash-kml').innerText = (d.stats.globalKML || 0).toFixed(2);
+        document.getElementById('dash-costkm').innerText = fmtRp(d.stats.globalCostKM);
+        
+        const setTrend = (id, pct, currVal, fmtFn) => {
+          const el = document.getElementById(id);
+          let trend = '';
+          if(pct > 0) trend = `<span class="trend-up"><i class="bi bi-arrow-up-right"></i> Naik ${pct.toFixed(1)}%</span>`;
+          else if(pct < 0) trend = `<span class="trend-down"><i class="bi bi-arrow-down-right"></i> Turun ${Math.abs(pct).toFixed(1)}%</span>`;
+          else trend = `<span class="trend-flat"><i class="bi bi-dash"></i> Stabil 0%</span>`;
+          
+          el.innerHTML = `<span class="text-muted" style="font-size:0.7rem;">Bulan Ini: <b class="text-dark">${fmtFn(currVal)}</b><br>${trend} vs bln lalu</span>`;
+        };
+        
+        setTrend('trend-vol', d.stats.volPct || 0, d.stats.currVol || 0, v => v.toFixed(2) + ' L');
+        setTrend('trend-biaya', d.stats.biayaPct || 0, d.stats.currBiaya || 0, v => fmtRp(v));
+
+        let isIrit = d.stats.isIrit;
+        let persenKML = d.stats.persenKML || "0.0";
+        let standarAvg = d.stats.standarAvg || "0.00";
+        let selisihKML = d.stats.selisihKML || "0.00";
+        
+        let kmlColor = isIrit ? 'text-success' : 'text-danger';
+        let kmlIcon = isIrit ? '↑' : '↓';
+        let kmlText = isIrit ? `Lebih irit +${selisihKML} KM/L` : `Lebih boros -${selisihKML} KM/L`;
+        
+        document.getElementById('trend-kml').innerHTML = 
+          `<div class="d-flex align-items-center mt-1">
+             <span class="${kmlColor} fw-bold me-2" style="font-size:0.95rem;">${kmlIcon} ${persenKML}%</span>
+           </div>
+           <span style="font-size:0.8rem; color:#6c757d; display:block; margin-top:2px;">
+             vs Standar (${standarAvg}) &bull; <strong class="text-dark">${kmlText}</strong>
+           </span>`;
+
+        let isJarakLebih = d.stats.isJarakLebih;
+        let persenJarak = d.stats.persenJarak || "0.0";
+        let standarJarak = Math.round(d.stats.standarJarak || 0).toLocaleString('id-ID');
+        let selisihJarak = Math.round(d.stats.selisihJarak || 0).toLocaleString('id-ID');
+        let jarakColor = isJarakLebih ? 'text-success' : 'text-danger';
+        let jarakIcon = isJarakLebih ? '↑' : '↓';
+        let jarakText = isJarakLebih ? `Lebih jauh +${selisihJarak} KM` : `Lebih pendek -${selisihJarak} KM`;
+
+        document.getElementById('trend-jarak').innerHTML =
+          `<div class="d-flex align-items-center mt-1">
+             <span class="${jarakColor} fw-bold me-2" style="font-size:0.95rem;">${jarakIcon} ${persenJarak}%</span>
+           </div>
+           <span style="font-size:0.8rem; color:#6c757d; display:block; margin-top:2px;">
+             vs Target (${standarJarak} KM) &bull; <strong class="text-dark">${jarakText}</strong>
+           </span>`;
+
+        let isCostLebihHemat = d.stats.isCostLebihHemat;
+        let persenCost = d.stats.persenCostKM || "0.0";
+        let standarCost = d.stats.standarCostKM || 0;
+        let selisihCost = d.stats.selisihCostKM || 0;
+        let costColor = isCostLebihHemat ? 'text-success' : 'text-danger'; 
+        let costIcon = isCostLebihHemat ? '↓' : '↑'; 
+        let costText = isCostLebihHemat 
+          ? `Lebih hemat Rp ${Math.round(selisihCost).toLocaleString('id-ID')}/KM` 
+          : `Lebih mahal Rp ${Math.round(selisihCost).toLocaleString('id-ID')}/KM`;
+
+        document.getElementById('trend-costkm').innerHTML = 
+          `<div class="d-flex align-items-center mt-1">
+             <span class="${costColor} fw-bold me-2" style="font-size:0.95rem;">${costIcon} ${persenCost}%</span>
+           </div>
+           <span style="font-size:0.8rem; color:#6c757d; display:block; margin-top:2px;">
+             vs Standar (${fmtRp(standarCost)}) &bull; <strong class="text-dark">${costText}</strong>
+           </span>`;
+
+        let validData = (d.analysisTable || []).filter(x => x.totalJarak > 0 && x.actualKML > 0);
+        validData.sort((a,b) => b.actualKML - a.actualKML);
+
+        // Fungsi pembuat tabel Top 5
+        const buildTopTable = (data, isIrit) => {
+          let colorClass = isIrit ? 'text-success' : 'text-danger';
+          let html = `<table class="table table-sm table-borderless mb-0 align-middle">
+                        <thead>
+                          <tr class="text-secondary border-bottom">
+                            <th>No</th>
+                            <th>No Polisi</th>
+                            <th>Jenis</th>
+                            <th class="text-center">Standar KM/L</th>
+                            <th class="text-end">Aktual KM/L</th>
+                          </tr>
+                        </thead>
+                        <tbody>`;
+          data.forEach((x, i) => {
+             html += `<tr class="border-bottom">
+                        <td><b>${i+1}</b></td>
+                        <td class="fw-bold">${x.plat}</td>
+                        <td>${x.jenis || '-'}</td>
+                        <td class="text-center">${x.stdMin || 0}</td>
+                        <td class="${colorClass} fw-bold text-center">${x.actualKML.toFixed(2)}</td>
+                      </tr>`;
+          });
+          html += `</tbody></table>`;
+          return html;
+        };
+
+        // Ambil 5 teratas (Irit) dan 5 terbawah (Boros)
+        let dataIrit = validData.slice(0, 5);
+        let dataBoros = validData.slice(-5).reverse();
+
+        document.getElementById('top-irit').innerHTML = dataIrit.length > 0 ? buildTopTable(dataIrit, true) : '<span class="text-muted">Data tidak cukup</span>';
+        document.getElementById('top-boros').innerHTML = dataBoros.length > 0 ? buildTopTable(dataBoros, false) : '<span class="text-muted">Data tidak cukup</span>';
+
+        let supirHtml = '';
+        if (d.supirStats) {
+          // Mengubah object menjadi array dan memfilter nama supir yang tidak valid/kosong/header
+          let driverArray = Object.keys(d.supirStats)
+            .filter(name => name && name.trim() !== '' && name.toUpperCase() !== 'NAMA SUPIR')
+            .map(name => {
+              let s = d.supirStats[name];
+              let totalJarak = parseFloat(s.totalJarak) || 0;
+              let totalVol = parseFloat(s.totalVol) || 0;
+              let totalBiaya = parseFloat(s.biaya) || 0;
+
+              let avgKML = totalVol > 0 ? (totalJarak / totalVol) : 0;
+              let avgCostKM = totalJarak > 0 ? (totalBiaya / totalJarak) : 0;
+
+              return { name, totalJarak, avgKML, avgCostKM };
+            });
+
+          // Urutkan berdasarkan KM/L tertinggi (paling efisien)
+          driverArray.sort((a, b) => b.avgKML - a.avgKML);
+
+          driverArray.forEach((ds, index) => {
+            let rankBadge = index + 1;
+            if (index === 0) rankBadge = '🥇 1';
+            else if (index === 1) rankBadge = '🥈 2';
+            else if (index === 2) rankBadge = '🥉 3';
+
+            // Status evaluasi berdasarkan jarak tempuh operasional & efisiensi
+            let statusBadge = '<span class="badge bg-secondary">Evaluasi</span>';
+            if (ds.totalJarak > 0) {
+              if (ds.avgKML < 7) {
+                statusBadge = '<span class="badge bg-danger">Boros</span>';
+              } else if (ds.avgKML >= 7 && ds.avgKML < 9) {
+                statusBadge = '<span class="badge bg-primary">Normal</span>';
+              } else {
+                statusBadge = '<span class="badge bg-success">Efisien</span>';
+              }
+            }
+
+            supirHtml += `
+              <tr class="text-center">
+                <td class="fw-bold">${rankBadge}</td>
+                <td class="text-start fw-bold">${ds.name}</td>
+                <td>${Math.round(ds.totalJarak).toLocaleString('id-ID')}</td>
+                <td class="fw-bold text-info">${ds.avgKML.toFixed(2)}</td>
+                <td class="fw-bold text-warning">Rp ${Math.round(ds.avgCostKM).toLocaleString('id-ID')}</td>
+                <td>${statusBadge}</td>
+              </tr>
+            `;
+          });
+        }
+        document.getElementById('supir-body').innerHTML = supirHtml || '<tr><td colspan="6" class="text-center text-muted">Data supir tidak tersedia</td></tr>';
+
+        this.renderAnalysisTable(d.analysisTable || []);
+        // this.renderPivotTable(d.pivotData);
+        this.renderCharts(d.chartMonthly, d.pivotData, d.bbmDist, d.analysisTable);
+
+      }).getDashboardData();
+    },
+    
+    renderAnalysisTable: function(data) {
+      const tbody = document.getElementById('analysis-body');
+      if (data.length === 0) return tbody.innerHTML = `<tr><td colspan="12" class="text-center py-4">Data belum cukup untuk dianalisa.</td></tr>`;
+      
+      let html = '';
+      data.forEach(d => {
+        let statusHtml = '';
+        if (d.stdMin === 0) {
+           statusHtml = '<span class="badge bg-secondary">NO DATA</span>';
+        } else if (d.actualKML < d.stdMin) {
+           statusHtml = '<span class="badge bg-danger">BOROS</span>';
+        } else {
+           statusHtml = '<span class="badge bg-success">EFISIEN</span>';
+        }
+
+        html += `
+        <tr>
+          <td class="fw-bold text-start">${d.plat}</td>
+          <td>${d.jenis}</td>
+          <td class="text-secondary fw-bold">${d.stdMin}</td>
+          <td class="text-center">${statusHtml}</td>
+          <td>${d.kmAwal.toLocaleString('id-ID')}</td>
+          <td>${d.kmAkhir.toLocaleString('id-ID')}</td>
+          <td class="fw-bold">${d.totalJarak.toLocaleString('id-ID')}</td>
+          <td>${d.jarakPerHari.toFixed(1)}</td>
+          <td>${d.totalVol.toFixed(2)}</td>
+          <td>Rp ${Math.round(d.totalBiaya).toLocaleString('id-ID')}</td>
+          <td class="fw-bold text-primary">${d.actualKML.toFixed(2)}</td>
+          <td>Rp ${Math.round(d.actualCostKM).toLocaleString('id-ID')}</td>
+        </tr>`;
+      });
+      tbody.innerHTML = html;
+    },
+
+    renderPivotTable: function(pData) {
+      if (!pData || !pData.months) return;
+      const thead = document.getElementById('pivot-head');
+      const tbody = document.getElementById('pivot-body');
+      
+      let headHtml = `<tr><th rowspan="2" class="align-middle text-start bg-light">Plat Mobil</th>`;
+      pData.months.forEach(m => headHtml += `<th colspan="2" class="text-center bg-primary text-white border-light">${m}</th>`);
+      headHtml += `</tr><tr>`;
+      pData.months.forEach(m => headHtml += `<th class="text-center bg-light" style="font-size:0.75rem;">Vol (L)</th><th class="text-center bg-light" style="font-size:0.75rem;">Total (Rp)</th>`);
+      headHtml += `</tr>`;
+      thead.innerHTML = headHtml;
+
+      let bodyHtml = '';
+      Object.keys(pData.cars).forEach(plat => {
+        bodyHtml += `<tr><td class="fw-bold text-start">${plat}</td>`;
+        pData.months.forEach(m => {
+          const d = pData.cars[plat][m];
+          let vol = 0;
+          if (d && d.costkm > 0 && d.kml > 0) vol = (d.biaya / d.costkm) / d.kml;
+          
+          let volTxt = vol > 0 ? vol.toFixed(1) : '-';
+          let biayaTxt = d && d.biaya > 0 ? Math.round(d.biaya).toLocaleString('id-ID') : '-';
+          
+          bodyHtml += `<td class="text-center text-secondary">${volTxt}</td><td class="text-end text-danger fw-bold">${biayaTxt}</td>`;
+        });
+        bodyHtml += `</tr>`;
+      });
+      tbody.innerHTML = bodyHtml;
+    },
+
+    renderCharts: function(monthly, pData, bbmDist, analysisTable) {
+      const render = (id, type, labels, datasets, opts) => {
+        if(this.charts[id]) this.charts[id].destroy();
+        this.charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
+          type: type, data: { labels: labels, datasets: datasets }, options: opts
+        });
+      };
+
+      render('chartMonthly', 'bar', monthly.labels, [
+        { 
+          label: 'Biaya (Rp)', 
+          data: monthly.biaya, 
+          backgroundColor: 'rgba(176, 38, 255, 0.7)', // Neon Purple transparan
+          borderColor: '#b026ff',                     // Garis pinggir Neon Purple tebal
+          borderWidth: 2,
+          borderRadius: 6,                            // Ujung batang membulat modern
+          yAxisID: 'y' 
+        },
+        { 
+          label: 'Volume (L)', 
+          data: monthly.vol, 
+          type: 'line', 
+          borderColor: '#00f3ff',                     // Neon Cyan Terang
+          borderWidth: 3, 
+          tension: 0.4,                               // <--- INI YANG MEMBUAT GARISNYA SMOOTH / MELENGKUNG
+          pointBackgroundColor: '#121212',            // Titik tengah warna gelap
+          pointBorderColor: '#00f3ff',                // Pinggiran titik warna Neon Cyan
+          pointBorderWidth: 2,
+          pointRadius: 4,                             // Ukuran titik
+          pointHoverRadius: 7,                        // Titik membesar saat disentuh
+          yAxisID: 'y1' 
+        }
+      ], {
+        responsive: true, interaction: { mode: 'index', intersect: false },
+        scales: { 
+          y: { type: 'linear', position: 'left' }, 
+          y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false } } 
+        }
+      });
+
+      let effDatasets = []; let costDatasets = [];
+      const colors = ['#0d6efd', '#198754', '#dc3545', '#ffc107', '#0dcaf0', '#6f42c1', '#fd7e14', '#20c997'];
+      let cIdx = 0;
+      
+      Object.keys(pData.cars).forEach(plat => {
+         let dataEff = []; let dataCost = [];
+         pData.months.forEach(m => {
+             let d = pData.cars[plat][m];
+             dataEff.push(d && d.kml > 0 ? d.kml.toFixed(2) : null);
+             dataCost.push(d && d.costkm > 0 ? d.costkm.toFixed(0) : null);
+         });
+         let color = colors[cIdx % colors.length];
+         effDatasets.push({ label: plat, data: dataEff, borderColor: color, backgroundColor: color, fill: false, tension: 0.3, spanGaps: true });
+         costDatasets.push({ label: plat, data: dataCost, borderColor: color, backgroundColor: color, fill: false, tension: 0.3, spanGaps: true });
+         cIdx++;
+      });
+
+      render('chartEfficiency', 'line', pData.months, effDatasets, 
+        { responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } }, scales: { y: { beginAtZero: true } } }
+      );
+      render('chartCostKm', 'line', pData.months, costDatasets, 
+        { responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } }, scales: { y: { beginAtZero: true } } }
+      );
+
+      if (bbmDist) {
+        // 1. FILTER DATA: Membuang label "JENIS BAHAN BAKAR" dan baris kosong
+        let bbmLabels = [];
+        let bbmData = [];
+        Object.keys(bbmDist).forEach(k => {
+          if (k && k.trim() !== "" && k.toUpperCase() !== "JENIS BAHAN BAKAR") {
+            bbmLabels.push(k);
+            bbmData.push(bbmDist[k].vol.toFixed(1));
+          }
+        });
+
+        // 2. WARNA LIGHT NEON
+        let pieColors = ['#00f3ff', '#00ff66', '#ff00ff', '#ccff00', '#b026ff', '#ff6600'];
+        
+        if(this.charts['chartBbmDist']) this.charts['chartBbmDist'].destroy();
+        this.charts['chartBbmDist'] = new Chart(document.getElementById('chartBbmDist').getContext('2d'), {
+          type: 'doughnut',
+          data: { 
+            labels: bbmLabels, 
+            datasets: [{ 
+              data: bbmData, 
+              backgroundColor: pieColors,
+              borderWidth: 2,
+              borderColor: 'transparent', // Garis batas transparan agar warna menyatu
+              hoverOffset: 6
+            }] 
+          },
+          options: { 
+            responsive: true, 
+            maintainAspectRatio: false, 
+            cutout: '45%', // Donat lebih tipis dan modern
+            plugins: { 
+              legend: { 
+                position: 'right',
+                labels: {
+                  usePointStyle: true, // Indikator legend menjadi bulat
+                  padding: 15
+                }
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    let label = context.label || '';
+                    let value = parseFloat(context.raw) || 0;
+                    // Hitung total semua BBM
+                    let total = context.dataset.data.reduce((a, b) => parseFloat(a) + parseFloat(b), 0);
+                    // Hitung persentase
+                    let percentage = ((value / total) * 100).toFixed(1) + '%';
+                    
+                    // Format tampilan: "Nama BBM: 100 L (50.5%)"
+                    return label + ': ' + value.toLocaleString('id-ID') + ' L (' + percentage + ')';
+                  }
+                }
+              } 
+            } 
+          }
+        });
+      }
+    },
+
+    onImageSelected: function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        document.getElementById('previewImage').src = e.target.result;
+        document.getElementById('imageString').value = e.target.result; 
+        document.getElementById('cameraBtn').style.display = 'none';
+        document.getElementById('previewContainer').style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    },
+
+    removeImage: function() {
+      document.getElementById('fotoStruk').value = '';
+      document.getElementById('imageString').value = '';
+      document.getElementById('previewContainer').style.display = 'none';
+      document.getElementById('cameraBtn').style.display = 'block';
+    },
+
+    submitData: function() {
+      const form = document.getElementById('formBBM');
+      const imgString = document.getElementById('imageString').value;
+
+      if (!form.checkValidity() || !imgString) {
+        form.classList.add('was-validated');
+        if (!imgString) Swal.fire('Perhatian', 'Wajib melampirkan foto struk!', 'warning');
+        return;
+      }
+
+      const btn = document.getElementById('btnSubmit');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Memproses...';
+
+      const payload = {
+        tanggal: document.getElementById('tanggal').value,
+        plat: document.getElementById('plat').value,
+        supir: document.getElementById('supir').value,
+        spbu: document.getElementById('spbu').value,
+        tipeBBM: document.getElementById('tipeBBM').value,
+        jenisBBM: document.getElementById('jenisBBM').value,
+        harga: document.getElementById('harga').value,
+        volume: document.getElementById('volume').value,
+        odometer: document.getElementById('odometer').value,
+        imageString: imgString
+      };
+
+      google.script.run
+        .withSuccessHandler((res) => {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill me-2"></i>Kirim Data Transaksi';
+          if (res.status === 'success') {
+            Swal.fire({ icon: 'success', title: 'Tersimpan!', timer: 2000, showConfirmButton: false });
+            form.reset();
+            form.classList.remove('was-validated');
+            this.removeImage();
+            let now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('tanggal').value = now.toISOString().slice(0, 16);
+            document.getElementById('jenisBBM').disabled = true; 
+            this.switchView('history', document.querySelectorAll('.nav-item')[2]);
+          } else {
+            Swal.fire('Gagal Menyimpan', res.message, 'error');
+          }
+        })
+        .withFailureHandler((err) => {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill me-2"></i>Kirim Data Transaksi';
+          this.onSystemError(err.message);
+        })
+        .simpanData(payload);
+    },
+
+    onSystemError: function(msg) {
+      document.getElementById('globalLoader').style.display = 'none';
+      Swal.fire('Kesalahan Sistem', msg, 'error');
+    }
+  };
+
+  document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+
+</body>
+</html>

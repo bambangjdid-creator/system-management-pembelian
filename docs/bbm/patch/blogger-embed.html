@@ -1,0 +1,95 @@
+<!--
+  ===================================================================
+  BLOGGER EMBED — BBM Logistik Pro
+  Cara pakai:
+    1. Blogger -> Pages -> New page   (atau Posts -> New post)
+    2. Klik ikon "< >" = HTML view     <-- WAJIB, jangan di mode Compose
+    3. Tempel SELURUH kode di bawah apa adanya
+    4. Ganti SRC bila URL deployment /exec Anda berubah
+    5. Publish
+  Catatan: jangan membuka editor Compose setelah menempel; Blogger kadang
+  "merapikan" atribut iframe dan merusaknya.
+  ===================================================================
+-->
+<style>
+  .bbm-embed-wrap { position: relative; width: 100%; margin: 0 auto; max-width: 640px; }
+  .bbm-embed-frame {
+    width: 100%;
+    height: 900px;              /* tinggi awal; auto-height menyesuaikan otomatis */
+    border: 0;
+    border-radius: 12px;
+    display: block;
+    background: #f4f7f6;
+    box-shadow: 0 6px 24px rgba(0,0,0,.08);
+  }
+  .bbm-embed-open {
+    display: block; margin: 10px 0 0; font-size: 12px;
+    text-align: right; color: #0d6efd; text-decoration: none;
+  }
+  .bbm-embed-note { margin: 8px 0 0; font-size: 11px; color: #6c757d; text-align: center; }
+  @media (max-width: 480px) {
+    .bbm-embed-frame { height: 780px; border-radius: 0; box-shadow: none; }
+    .bbm-embed-wrap { max-width: 100%; }
+  }
+</style>
+
+<div class="bbm-embed-wrap">
+  <iframe
+    id="bbmFrame"
+    class="bbm-embed-frame"
+    src="https://script.google.com/macros/s/AKfycbyhfyH9MJ0LXMMVN5UrzNZoTsf54gZZ1G079nBnKjiO1QeYcGyibTRINMDUddOCvuu9/exec"
+    title="Aplikasi Pencatatan BBM"
+    loading="lazy"
+    referrerpolicy="no-referrer-when-downgrade"
+    allow="camera; clipboard-write; fullscreen"
+    allowfullscreen>
+    Browser Anda tidak mendukung iframe.
+    <a href="https://script.google.com/macros/s/AKfycbyhfyH9MJ0LXMMVN5UrzNZoTsf54gZZ1G079nBnKjiO1QeYcGyibTRINMDUddOCvuu9/exec" target="_blank" rel="noopener">Buka aplikasi</a>
+  </iframe>
+
+  <a class="bbm-embed-open"
+     href="https://script.google.com/macros/s/AKfycbyhfyH9MJ0LXMMVN5UrzNZoTsf54gZZ1G079nBnKjiO1QeYcGyibTRINMDUddOCvuu9/exec"
+     target="_blank" rel="noopener">Buka di tab baru &nearr;</a>
+
+  <p class="bbm-embed-note">
+    Butuh izin kamera untuk foto struk. Bila layar kosong, buka di tab baru.
+  </p>
+</div>
+
+<script>
+(function () {
+  var frame = document.getElementById('bbmFrame');
+  if (!frame) return;
+
+  /* ---- Auto-height: hanya menerima pesan dari domain Google ---- */
+  var ALLOWED = /^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|script\.google\.com)$/i;
+
+  window.addEventListener('message', function (e) {
+    if (!ALLOWED.test(e.origin)) return;
+    var d = e.data;
+    if (!d || d.type !== 'bbm:height') return;
+
+    var h = parseInt(d.height, 10);
+    if (!isFinite(h)) return;
+
+    h = Math.max(400, Math.min(h, 4000));         /* batas wajar */
+    if (Math.abs(h - frame.offsetHeight) < 8) return;
+    frame.style.height = h + 'px';
+  });
+
+  /* ---- Fallback: kalau iframe diblokir / tidak termuat ---- */
+  var loaded = false;
+  frame.addEventListener('load', function () { loaded = true; });
+
+  setTimeout(function () {
+    if (loaded) return;
+    var div = document.createElement('div');
+    div.setAttribute('style',
+      'padding:16px;border:1px solid #ffc107;background:#fff8e1;' +
+      'border-radius:8px;font-size:13px;margin-top:8px;');
+    div.innerHTML = 'Aplikasi tidak dapat dimuat di halaman ini. ' +
+      '<a href="' + frame.src + '" target="_blank" rel="noopener">Buka di tab baru</a>.';
+    frame.insertAdjacentElement('afterend', div);
+  }, 8000);
+})();
+</script>

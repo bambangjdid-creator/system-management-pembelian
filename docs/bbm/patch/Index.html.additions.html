@@ -1,0 +1,262 @@
+<!--
+  ============================================================================
+  TAMBAHAN UNTUK Index.html — BBM Logistik Pro
+  Semua blok di bawah dimasukkan ke dalam objek App / script yang sudah ada.
+  ============================================================================
+-->
+
+<!-- ==========================================================================
+     1. HELPER: ESCAPE HTML  (taruh sebelum "const App = {")
+     Dipakai untuk semua nilai yang berasal dari pengguna (nama supir, plat,
+     alamat SPBU, dll.) sebelum dimasukkan ke innerHTML.
+     ========================================================================== -->
+<script>
+  const BBM = {
+    esc: function (s) {
+      return String(s === null || s === undefined ? '' : s).replace(
+        /[&<>"']/g,
+        function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                   '"': '&quot;', "'": '&#39;' }[c];
+        }
+      );
+    },
+
+    /* Pembungkus google.script.run: SELALU menutup spinner dan mengaktifkan
+       kembali tombol, baik sukses maupun gagal. Menggantikan pola lama yang
+       hanya memasang withSuccessHandler -> spinner bisa menggantung selamanya. */
+    run: function (fnName, args, opts) {
+      opts = opts || {};
+      Swal.fire({ title: opts.loadingText || 'Memproses...',
+                  didOpen: function () { Swal.showLoading(); },
+                  allowOutsideClick: false });
+      var done = false;
+      function finish(ok, payload) {
+        if (done) return;
+        done = true;
+        Swal.close();
+        if (opts.onFinally) opts.onFinally();
+        if (ok) { (opts.onSuccess || function () {})(payload); }
+        else    { (opts.onError   || function (m) {
+                    Swal.fire('Gagal', m || 'Terjadi kesalahan sistem.', 'error');
+                  })(payload); }
+      }
+      var runner = google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.status === 'error') return finish(false, res.message);
+          finish(true, res);
+        })
+        .withFailureHandler(function (err) {
+          finish(false, (err && err.message) || String(err));
+        });
+      runner[fnName].apply(runner, args || []);
+    },
+
+    /* Kompres foto kamera sebelum dikirim.
+       Foto 4-8 MB -> ~200-350 KB, menghemat kuota Drive & menghindari timeout. */
+    compressImage: function (file, maxSide, quality) {
+      maxSide = maxSide || 1280;
+      quality = quality || 0.72;
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onerror = function () { reject(new Error('Gagal membaca file.')); };
+        reader.onload = function (e) {
+          var img = new Image();
+          img.onerror = function () { reject(new Error('File bukan gambar valid.')); };
+          img.onload = function () {
+            var w = img.width, h = img.height;
+            var scale = Math.min(1, maxSide / Math.max(w, h));
+            var cw = Math.round(w * scale), ch = Math.round(h * scale);
+            var canvas = document.createElement('canvas');
+            canvas.width = cw; canvas.height = ch;
+            canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+</script>
+
+<!-- ==========================================================================
+     2. GANTI method populate()  (versi lama: innerHTML += di dalam loop)
+     ========================================================================== -->
+<script>
+  /*
+  populate: function (id, arrayData, placeholder) {
+    const el = document.getElementById(id);
+    const opts = ['<option value="" disabled selected>' + BBM.esc(placeholder) + '</option>'];
+    (arrayData || []).forEach(function (item) {
+      opts.push('<option value="' + BBM.esc(item) + '">' + BBM.esc(item) + '</option>');
+    });
+    el.innerHTML = opts.join('');          // satu kali tulis DOM
+  },
+  */
+</script>
+
+<!-- ==========================================================================
+     3. GANTI applyHistoryFilter()  (row template yang aman)
+     ========================================================================== -->
+<script>
+  /*
+  applyHistoryFilter: function () {
+    var bulanVal = document.getElementById('filterBulan').value;
+    var tbody = document.getElementById('history-table-body');
+
+    var filtered = this.allHistoryData || [];
+    if (bulanVal !== 'ALL') {
+      filtered = filtered.filter(function (d) { return d.bulan === bulanVal; });
+    }
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary py-3">Tidak ada data.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(function (trx) {
+      var vol = Number(trx.volume) || 0;
+      var total = Number(trx.total) || 0;
+      var odo = Number(trx.odo) || 0;
+      return '<tr>' +
+        '<td>' + BBM.esc(trx.tanggal) + '</td>' +
+        '<td class="fw-bold text-dark">' + BBM.esc(trx.plat) + '</td>' +
+        '<td>' + BBM.esc(trx.supir) + '</td>' +
+        '<td><span class="badge bg-secondary">' + vol.toFixed(2) + ' L</span></td>' +
+        '<td class="fw-bold text-danger">Rp ' + total.toLocaleString('id-ID') + '</td>' +
+        '<td>' + odo.toLocaleString('id-ID') + '</td>' +
+        '</tr>';
+    }).join('');
+  },
+  */
+</script>
+
+<!-- ==========================================================================
+     4. GANTI onImageSelected()  -> kompres otomatis
+     ========================================================================== -->
+<script>
+  /*
+  onImageSelected: function (event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    var self = this;
+    BBM.compressImage(file, 1280, 0.72).then(function (dataUrl) {
+      document.getElementById('previewImage').src = dataUrl;
+      document.getElementById('imageString').value = dataUrl;
+      document.getElementById('cameraBtn').style.display = 'none';
+      document.getElementById('previewContainer').style.display = 'block';
+    }).catch(function (err) {
+      Swal.fire('Foto tidak valid', err.message, 'error');
+      document.getElementById('fotoStruk').value = '';
+    });
+  },
+  */
+</script>
+
+<!-- ==========================================================================
+     5. GANTI submitData()  -> pakai BBM.run, tombol selalu pulih
+     ========================================================================== -->
+<script>
+  /*
+  submitData: function () {
+    var form = document.getElementById('formBBM');
+    var imgString = document.getElementById('imageString').value;
+
+    if (!form.checkValidity() || !imgString) {
+      form.classList.add('was-validated');
+      if (!imgString) Swal.fire('Perhatian', 'Wajib melampirkan foto struk!', 'warning');
+      return;
+    }
+
+    var payload = {
+      tanggal: document.getElementById('tanggal').value,
+      plat: document.getElementById('plat').value,
+      supir: document.getElementById('supir').value,
+      spbu: document.getElementById('spbu').value,
+      tipeBBM: document.getElementById('tipeBBM').value,
+      jenisBBM: document.getElementById('jenisBBM').value,
+      harga: document.getElementById('harga').value,
+      volume: document.getElementById('volume').value,
+      odometer: document.getElementById('odometer').value,
+      imageString: imgString
+    };
+
+    var btn = document.getElementById('btnSubmit');
+    var label = '<i class="bi bi-cloud-arrow-up-fill me-2"></i>Kirim Data Transaksi';
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Memproses...';
+
+    BBM.run('simpanData', [payload], {
+      loadingText: 'Menyimpan transaksi...',
+      onSuccess: function (res) {
+        Swal.fire({ icon: 'success', title: 'Tersimpan!', timer: 2000, showConfirmButton: false });
+        form.reset();
+        form.classList.remove('was-validated');
+        this.removeImage();
+        var now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('tanggal').value = now.toISOString().slice(0, 16);
+        document.getElementById('jenisBBM').disabled = true;
+        this.switchView('history', document.querySelectorAll('.nav-item')[2]);
+      }.bind(this),
+      onFinally: function () { btn.disabled = false; btn.innerHTML = label; }
+    });
+  },
+  */
+</script>
+
+<!-- ==========================================================================
+     6. LOGIN ADMIN (menggantikan PIN 609215 yang hardcoded)
+     Ganti isi switchView() bagian settings dengan versi ini.
+     ========================================================================== -->
+<script>
+  /*
+  switchView: function (viewId, navElement) {
+    if (viewId !== 'settings') return this.executeSwitch(viewId, navElement);
+
+    var self = this;
+    Swal.fire({
+      title: '<i class="bi bi-shield-lock-fill text-danger" style="font-size:2rem;"></i><br>Akses Admin',
+      text: 'Masukkan PIN untuk membuka menu ini.',
+      input: 'password',
+      inputPlaceholder: 'PIN...',
+      inputAttributes: { autocapitalize: 'off', autocorrect: 'off' },
+      showCancelButton: true,
+      confirmButtonText: 'Buka Kunci',
+      cancelButtonText: 'Batal'
+    }).then(function (result) {
+      if (!result.isConfirmed) return;
+
+      BBM.run('loginAdmin_', [result.value], {
+        loadingText: 'Memeriksa PIN...',
+        onSuccess: function (res) {
+          sessionStorage.setItem('bbm_admin_token', res.token);   // token dari server
+          self.executeSwitch(viewId, navElement);
+        },
+        onError: function (msg) {
+          Swal.fire({ icon: 'error', title: 'Akses Ditolak', text: msg });
+        }
+      });
+    });
+  },
+
+  // helper: sertakan token pada setiap panggilan master data
+  adminToken: function () {
+    return sessionStorage.getItem('bbm_admin_token') || '';
+  },
+  */
+</script>
+
+<!--
+  ============================================================================
+  CATATAN PENERAPAN
+  ----------------------------------------------------------------------------
+  - Blok di atas masih dibungkus komentar agar file ini tidak merusak Index.html
+    bila tertempel apa adanya. Hapus pembungkus /* ... *\/ saat menyalin.
+  - Di Code.gs, tambahkan parameter token pada editMasterData /
+    deleteMasterDataAction / addMasterData, lalu panggil requireToken_(token).
+    Tanpa itu, PIN pindah ke server tetap tidak menutup celah pemanggilan
+    langsung ke fungsi server.
+  - Setelah semua selesai: Deploy -> Manage deployments -> New version.
+  ============================================================================
+-->
